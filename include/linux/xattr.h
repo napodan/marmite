@@ -13,10 +13,6 @@
 #define XATTR_CREATE	0x1	/* set value, fail if attr already exists */
 #define XATTR_REPLACE	0x2	/* set value, fail if attr does not exist */
 
-#ifdef  __KERNEL__
-
-#include <linux/types.h>
-
 /* Namespaces */
 #define XATTR_OS2_PREFIX "os2."
 #define XATTR_OS2_PREFIX_LEN (sizeof (XATTR_OS2_PREFIX) - 1)
@@ -32,6 +28,10 @@
 
 #define XATTR_USER_PREFIX "user."
 #define XATTR_USER_PREFIX_LEN (sizeof (XATTR_USER_PREFIX) - 1)
+
+#ifdef  __KERNEL__
+
+#include <linux/types.h>
 
 struct inode;
 struct dentry;

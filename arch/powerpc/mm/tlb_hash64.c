@@ -38,14 +38,13 @@ DEFINE_PER_CPU(struct ppc64_tlb_batch, ppc64_tlb_batch);
  * neesd to be flushed. This function will either perform the flush
  * immediately or will batch it up if the current CPU has an active
  * batch on it.
- *
- * Must be called from within some kind of spinlock/non-preempt region...
  */
 void hpte_need_flush(struct mm_struct *mm, unsigned long addr,
 		     pte_t *ptep, unsigned long pte, int huge)
 {
-	struct ppc64_tlb_batch *batch = &__get_cpu_var(ppc64_tlb_batch);
-	unsigned long vsid, vaddr;
+	unsigned long vpn;
+	struct ppc64_tlb_batch *batch = &get_cpu_var(ppc64_tlb_batch);
+	unsigned long vsid;
 	unsigned int psize;
 	int ssize;
 	real_pte_t rpte;
@@ -83,12 +82,12 @@ void hpte_need_flush(struct mm_struct *mm, unsigned long addr,
 	if (!is_kernel_addr(addr)) {
 		ssize = user_segment_size(addr);
 		vsid = get_vsid(mm->context.id, addr, ssize);
-		WARN_ON(vsid == 0);
 	} else {
 		vsid = get_kernel_vsid(addr, mmu_kernel_ssize);
 		ssize = mmu_kernel_ssize;
 	}
-	vaddr = hpt_va(addr, vsid, ssize);
+	WARN_ON(vsid == 0);
+	vpn = hpt_vpn(addr, vsid, ssize);
 	rpte = __real_pte(__pte(pte), ptep);
 
 	/*
@@ -98,7 +97,8 @@ void hpte_need_flush(struct mm_struct *mm, unsigned long addr,
 	 * and decide to use local invalidates instead...
 	 */
 	if (!batch->active) {
-		flush_hash_page(vaddr, rpte, psize, ssize, 0);
+		flush_hash_page(vpn, rpte, psize, ssize, 0);
+		put_cpu_var(ppc64_tlb_batch);
 		return;
 	}
 
@@ -123,10 +123,11 @@ void hpte_need_flush(struct mm_struct *mm, unsigned long addr,
 		batch->ssize = ssize;
 	}
 	batch->pte[i] = rpte;
-	batch->vaddr[i] = vaddr;
+	batch->vpn[i] = vpn;
 	batch->index = ++i;
 	if (i >= PPC64_TLB_BATCH_NR)
 		__flush_tlb_pending(batch);
+	put_cpu_var(ppc64_tlb_batch);
 }
 
 /*
@@ -146,7 +147,7 @@ void __flush_tlb_pending(struct ppc64_tlb_batch *batch)
 	if (cpumask_equal(mm_cpumask(batch->mm), tmp))
 		local = 1;
 	if (i == 1)
-		flush_hash_page(batch->vaddr[0], batch->pte[0],
+		flush_hash_page(batch->vpn[0], batch->pte[0],
 				batch->psize, batch->ssize, local);
 	else
 		flush_hash_range(i, local);
@@ -155,7 +156,7 @@ void __flush_tlb_pending(struct ppc64_tlb_batch *batch)
 
 void tlb_flush(struct mmu_gather *tlb)
 {
-	struct ppc64_tlb_batch *tlbbatch = &__get_cpu_var(ppc64_tlb_batch);
+	struct ppc64_tlb_batch *tlbbatch = &get_cpu_var(ppc64_tlb_batch);
 
 	/* If there's a TLB batch pending, then we must flush it because the
 	 * pages are going to be freed and we really don't want to have a CPU
@@ -164,8 +165,7 @@ void tlb_flush(struct mmu_gather *tlb)
 	if (tlbbatch->index)
 		__flush_tlb_pending(tlbbatch);
 
-	/* Push out batch of freed page tables */
-	pte_free_finish();
+	put_cpu_var(ppc64_tlb_batch);
 }
 
 /**
@@ -186,8 +186,6 @@ void tlb_flush(struct mmu_gather *tlb)
  * Because of that usage pattern, it's only available with CONFIG_HOTPLUG
  * and is implemented for small size rather than speed.
  */
-#ifdef CONFIG_HOTPLUG
-
 void __flush_hash_table_range(struct mm_struct *mm, unsigned long start,
 			      unsigned long end)
 {
@@ -221,5 +219,3 @@ void __flush_hash_table_range(struct mm_struct *mm, unsigned long start,
 	arch_leave_lazy_mmu_mode();
 	local_irq_restore(flags);
 }
-
-#endif /* CONFIG_HOTPLUG */

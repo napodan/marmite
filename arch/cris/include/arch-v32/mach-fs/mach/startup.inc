@@ -1,3 +1,6 @@
+#ifndef STARTUP_INC_INCLUDED
+#define STARTUP_INC_INCLUDED
+
 #include <hwregs/asm/reg_map_asm.h>
 #include <hwregs/asm/bif_core_defs_asm.h>
 #include <hwregs/asm/gio_defs_asm.h>
@@ -68,10 +71,6 @@
 	move.d   REG_ADDR(bif_core, regi_bif_core, rw_grp4_cfg), $r0
 	move.d   CONFIG_ETRAX_MEM_GRP4_CONFIG, $r1
 	move.d   $r1, [$r0]
-#ifdef CONFIG_ETRAX_VCS_SIM
-	;; Set up minimal flash waitstates
-	move.d 0, $r10
-	move.d REG_ADDR(bif_core, regi_bif_core, rw_grp1_cfg), $r11
-	move.d $r10, [$r11]
-#endif
 	.endm
+
+#endif

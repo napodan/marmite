@@ -34,7 +34,6 @@ static void msmtc_send_ipi_mask(const struct cpumask *mask, unsigned int action)
  */
 static void __cpuinit msmtc_init_secondary(void)
 {
-	void smtc_init_secondary(void);
 	int myvpe;
 
 	/* Don't enable Malta I/O interrupts (IP2) for secondary VPEs */
@@ -114,7 +113,8 @@ struct plat_smp_ops msmtc_smp_ops = {
  */
 
 
-int plat_set_irq_affinity(unsigned int irq, const struct cpumask *affinity)
+int plat_set_irq_affinity(struct irq_data *d, const struct cpumask *affinity,
+			  bool force)
 {
 	cpumask_t tmask;
 	int cpu = 0;
@@ -126,11 +126,11 @@ int plat_set_irq_affinity(unsigned int irq, const struct cpumask *affinity)
 	 * to the CPU daughterboard, and on the CoreFPGA2/3 34K models,
 	 * that signal is brought to IP2 of both VPEs. To avoid racing
 	 * concurrent interrupt service events, IP2 is enabled only on
-	 * one VPE, by convention VPE0.  So long as no bits are ever
+	 * one VPE, by convention VPE0.	 So long as no bits are ever
 	 * cleared in the affinity mask, there will never be any
 	 * interrupt forwarding.  But as soon as a program or operator
 	 * sets affinity for one of the related IRQs, we need to make
-	 * sure that we don't ever try to forward across the VPE boundry,
+	 * sure that we don't ever try to forward across the VPE boundary,
 	 * at least not until we engineer a system where the interrupt
 	 * _ack() or _end() function can somehow know that it corresponds
 	 * to an interrupt taken on another VPE, and perform the appropriate
@@ -144,7 +144,7 @@ int plat_set_irq_affinity(unsigned int irq, const struct cpumask *affinity)
 		if ((cpu_data[cpu].vpe_id != 0) || !cpu_online(cpu))
 			cpu_clear(cpu, tmask);
 	}
-	cpumask_copy(irq_desc[irq].affinity, &tmask);
+	cpumask_copy(d->affinity, &tmask);
 
 	if (cpus_empty(tmask))
 		/*
@@ -152,11 +152,11 @@ int plat_set_irq_affinity(unsigned int irq, const struct cpumask *affinity)
 		 * runtime code can anyway deal with the null set
 		 */
 		printk(KERN_WARNING
-			"IRQ affinity leaves no legal CPU for IRQ %d\n", irq);
+		       "IRQ affinity leaves no legal CPU for IRQ %d\n", d->irq);
 
 	/* Do any generic SMTC IRQ affinity setup */
-	smtc_set_irq_affinity(irq, tmask);
+	smtc_set_irq_affinity(d->irq, tmask);
 
-	return 0;
+	return IRQ_SET_MASK_OK_NOCOPY;
 }
 #endif /* CONFIG_MIPS_MT_SMTC_IRQAFF */

@@ -11,6 +11,7 @@
 
 #include <linux/linkage.h>
 #include <linux/smp.h>
+#include <linux/irqdomain.h>
 
 #include <asm/mipsmtregs.h>
 
@@ -31,7 +32,7 @@ struct irqaction;
 
 extern unsigned long irq_hwmask[];
 extern int setup_irq_smtc(unsigned int irq, struct irqaction * new,
-                          unsigned long hwmask);
+			  unsigned long hwmask);
 
 static inline void smtc_im_ack_irq(unsigned int irq)
 {
@@ -50,37 +51,45 @@ static inline void smtc_im_ack_irq(unsigned int irq)
 #ifdef CONFIG_MIPS_MT_SMTC_IRQAFF
 #include <linux/cpumask.h>
 
-extern int plat_set_irq_affinity(unsigned int irq,
-				  const struct cpumask *affinity);
-extern void smtc_forward_irq(unsigned int irq);
+extern int plat_set_irq_affinity(struct irq_data *d,
+				 const struct cpumask *affinity, bool force);
+extern void smtc_forward_irq(struct irq_data *d);
 
 /*
  * IRQ affinity hook invoked at the beginning of interrupt dispatch
  * if option is enabled.
  *
  * Up through Linux 2.6.22 (at least) cpumask operations are very
- * inefficient on MIPS.  Initial prototypes of SMTC IRQ affinity
+ * inefficient on MIPS.	 Initial prototypes of SMTC IRQ affinity
  * used a "fast path" per-IRQ-descriptor cache of affinity information
  * to reduce latency.  As there is a project afoot to optimize the
  * cpumask implementations, this version is optimistically assuming
  * that cpumask.h macro overhead is reasonable during interrupt dispatch.
  */
-#define IRQ_AFFINITY_HOOK(irq)						\
-do {									\
-    if (!cpumask_test_cpu(smp_processor_id(), irq_desc[irq].affinity)) {\
-	smtc_forward_irq(irq);						\
-	irq_exit();							\
-	return;								\
-    }									\
-} while (0)
+static inline int handle_on_other_cpu(unsigned int irq)
+{
+	struct irq_data *d = irq_get_irq_data(irq);
+
+	if (cpumask_test_cpu(smp_processor_id(), d->affinity))
+		return 0;
+	smtc_forward_irq(d);
+	return 1;
+}
 
 #else /* Not doing SMTC affinity */
 
-#define IRQ_AFFINITY_HOOK(irq) do { } while (0)
+static inline int handle_on_other_cpu(unsigned int irq) { return 0; }
 
 #endif /* CONFIG_MIPS_MT_SMTC_IRQAFF */
 
 #ifdef CONFIG_MIPS_MT_SMTC_IM_BACKSTOP
+
+static inline void smtc_im_backstop(unsigned int irq)
+{
+	if (irq_hwmask[irq] & 0x0000ff00)
+		write_c0_tccontext(read_c0_tccontext() &
+				   ~(irq_hwmask[irq] & 0x0000ff00));
+}
 
 /*
  * Clear interrupt mask handling "backstop" if irq_hwmask
@@ -88,28 +97,22 @@ do {									\
  * functions will take over re-enabling the low-level mask.
  * Otherwise it will be done on return from exception.
  */
-#define __DO_IRQ_SMTC_HOOK(irq)						\
-do {									\
-	IRQ_AFFINITY_HOOK(irq);						\
-	if (irq_hwmask[irq] & 0x0000ff00)				\
-		write_c0_tccontext(read_c0_tccontext() &		\
-				   ~(irq_hwmask[irq] & 0x0000ff00));	\
-} while (0)
+static inline int smtc_handle_on_other_cpu(unsigned int irq)
+{
+	int ret = handle_on_other_cpu(irq);
 
-#define __NO_AFFINITY_IRQ_SMTC_HOOK(irq)				\
-do {									\
-	if (irq_hwmask[irq] & 0x0000ff00)                               \
-		write_c0_tccontext(read_c0_tccontext() &		\
-				   ~(irq_hwmask[irq] & 0x0000ff00));	\
-} while (0)
+	if (!ret)
+		smtc_im_backstop(irq);
+	return ret;
+}
 
 #else
 
-#define __DO_IRQ_SMTC_HOOK(irq)						\
-do {									\
-	IRQ_AFFINITY_HOOK(irq);						\
-} while (0)
-#define __NO_AFFINITY_IRQ_SMTC_HOOK(irq) do { } while (0)
+static inline void smtc_im_backstop(unsigned int irq) { }
+static inline int smtc_handle_on_other_cpu(unsigned int irq)
+{
+	return handle_on_other_cpu(irq);
+}
 
 #endif
 
@@ -130,9 +133,10 @@ extern void free_irqno(unsigned int irq);
 
 /*
  * Before R2 the timer and performance counter interrupts were both fixed to
- * IE7.  Since R2 their number has to be read from the c0_intctl register.
+ * IE7.	 Since R2 their number has to be read from the c0_intctl register.
  */
 #define CP0_LEGACY_COMPARE_IRQ 7
+#define CP0_LEGACY_PERFCNT_IRQ 7
 
 extern int cp0_compare_irq;
 extern int cp0_compare_irq_shift;

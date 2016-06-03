@@ -21,11 +21,9 @@
 #include <linux/amba/bus.h>
 #include <linux/amba/clcd.h>
 #include <linux/io.h>
+#include <linux/platform_data/clk-integrator.h>
 #include <linux/slab.h>
 
-#include <asm/clkdev.h>
-#include <mach/clkdev.h>
-#include <asm/hardware/icst.h>
 #include <mach/lm.h>
 #include <mach/impd1.h>
 #include <asm/sizes.h>
@@ -37,45 +35,6 @@ MODULE_PARM_DESC(lmid, "logic module stack position");
 
 struct impd1_module {
 	void __iomem	*base;
-	struct clk	vcos[2];
-	struct clk_lookup *clks[3];
-};
-
-static const struct icst_params impd1_vco_params = {
-	.ref		= 24000000,	/* 24 MHz */
-	.vco_max	= ICST525_VCO_MAX_3V,
-	.vco_min	= ICST525_VCO_MIN,
-	.vd_min		= 12,
-	.vd_max		= 519,
-	.rd_min		= 3,
-	.rd_max		= 120,
-	.s2div		= icst525_s2div,
-	.idx2s		= icst525_idx2s,
-};
-
-static void impd1_setvco(struct clk *clk, struct icst_vco vco)
-{
-	struct impd1_module *impd1 = clk->data;
-	u32 val = vco.v | (vco.r << 9) | (vco.s << 16);
-
-	writel(0xa05f, impd1->base + IMPD1_LOCK);
-	writel(val, clk->vcoreg);
-	writel(0, impd1->base + IMPD1_LOCK);
-
-#ifdef DEBUG
-	vco.v = val & 0x1ff;
-	vco.r = (val >> 9) & 0x7f;
-	vco.s = (val >> 16) & 7;
-
-	pr_debug("IM-PD1: VCO%d clock is %ld Hz\n",
-		 vconr, icst525_hz(&impd1_vco_params, vco));
-#endif
-}
-
-static const struct clk_ops impd1_clk_ops = {
-	.round	= icst_clk_round,
-	.set	= icst_clk_set,
-	.setvco	= impd1_setvco,
 };
 
 void impd1_tweak_control(struct device *dev, u32 mask, u32 val)
@@ -122,6 +81,7 @@ static struct clcd_panel vga = {
 	.height		= -1,
 	.tim2		= TIM2_BCD | TIM2_IPC,
 	.cntl		= CNTL_LCDTFT | CNTL_LCDVCOMP(1),
+	.caps		= CLCD_CAP_5551,
 	.connector	= IMPD1_CTRL_DISP_VGA,
 	.bpp		= 16,
 	.grayscale	= 0,
@@ -150,6 +110,7 @@ static struct clcd_panel svga = {
 	.tim2		= TIM2_BCD,
 	.cntl		= CNTL_LCDTFT | CNTL_LCDVCOMP(1),
 	.connector	= IMPD1_CTRL_DISP_VGA,
+	.caps		= CLCD_CAP_5551,
 	.bpp		= 16,
 	.grayscale	= 0,
 };
@@ -176,6 +137,7 @@ static struct clcd_panel prospector = {
 	.height		= -1,
 	.tim2		= TIM2_BCD,
 	.cntl		= CNTL_LCDTFT | CNTL_LCDVCOMP(1),
+	.caps		= CLCD_CAP_5551,
 	.fixedtimings	= 1,
 	.connector	= IMPD1_CTRL_DISP_LCD,
 	.bpp		= 16,
@@ -207,6 +169,7 @@ static struct clcd_panel ltm10c209 = {
 	.height		= -1,
 	.tim2		= TIM2_BCD,
 	.cntl		= CNTL_LCDTFT | CNTL_LCDVCOMP(1),
+	.caps		= CLCD_CAP_5551,
 	.fixedtimings	= 1,
 	.connector	= IMPD1_CTRL_DISP_LCD,
 	.bpp		= 16,
@@ -280,6 +243,7 @@ static void impd1fb_clcd_remove(struct clcd_fb *fb)
 
 static struct clcd_board impd1_clcd_data = {
 	.name		= "IM-PD/1",
+	.caps		= CLCD_CAP_5551 | CLCD_CAP_888,
 	.check		= clcdfb_check,
 	.decode		= clcdfb_decode,
 	.disable	= impd1fb_clcd_disable,
@@ -340,10 +304,6 @@ static struct impd1_device impd1_devs[] = {
 	}
 };
 
-static struct clk fixed_14745600 = {
-	.rate = 14745600,
-};
-
 static int impd1_probe(struct lm_device *dev)
 {
 	struct impd1_module *impd1;
@@ -372,49 +332,23 @@ static int impd1_probe(struct lm_device *dev)
 	printk("IM-PD1 found at 0x%08lx\n",
 		(unsigned long)dev->resource.start);
 
-	for (i = 0; i < ARRAY_SIZE(impd1->vcos); i++) {
-		impd1->vcos[i].ops = &impd1_clk_ops,
-		impd1->vcos[i].owner = THIS_MODULE,
-		impd1->vcos[i].params = &impd1_vco_params,
-		impd1->vcos[i].data = impd1;
-	}
-	impd1->vcos[0].vcoreg = impd1->base + IMPD1_OSC1;
-	impd1->vcos[1].vcoreg = impd1->base + IMPD1_OSC2;
-
-	impd1->clks[0] = clkdev_alloc(&impd1->vcos[0], NULL, "lm%x:01000",
-					dev->id);
-	impd1->clks[1] = clkdev_alloc(&fixed_14745600, NULL, "lm%x:00100",
-					dev->id);
-	impd1->clks[2] = clkdev_alloc(&fixed_14745600, NULL, "lm%x:00200",
-					dev->id);
-	for (i = 0; i < ARRAY_SIZE(impd1->clks); i++)
-		clkdev_add(impd1->clks[i]);
+	integrator_impd1_clk_init(impd1->base, dev->id);
 
 	for (i = 0; i < ARRAY_SIZE(impd1_devs); i++) {
 		struct impd1_device *idev = impd1_devs + i;
 		struct amba_device *d;
 		unsigned long pc_base;
+		char devname[32];
 
 		pc_base = dev->resource.start + idev->offset;
-
-		d = kzalloc(sizeof(struct amba_device), GFP_KERNEL);
-		if (!d)
+		snprintf(devname, 32, "lm%x:%5.5lx", dev->id, idev->offset >> 12);
+		d = amba_ahb_device_add_res(&dev->dev, devname, pc_base, SZ_4K,
+					    dev->irq, dev->irq,
+					    idev->platform_data, idev->id,
+					    &dev->resource);
+		if (IS_ERR(d)) {
+			dev_err(&dev->dev, "unable to register device: %ld\n", PTR_ERR(d));
 			continue;
-
-		dev_set_name(&d->dev, "lm%x:%5.5lx", dev->id, idev->offset >> 12);
-		d->dev.parent	= &dev->dev;
-		d->res.start	= dev->resource.start + idev->offset;
-		d->res.end	= d->res.start + SZ_4K - 1;
-		d->res.flags	= IORESOURCE_MEM;
-		d->irq[0]	= dev->irq;
-		d->irq[1]	= dev->irq;
-		d->periphid	= idev->id;
-		d->dev.platform_data = idev->platform_data;
-
-		ret = amba_device_register(d, &dev->resource);
-		if (ret) {
-			dev_err(&d->dev, "unable to register device: %d\n", ret);
-			kfree(d);
 		}
 	}
 
@@ -438,12 +372,9 @@ static int impd1_remove_one(struct device *dev, void *data)
 static void impd1_remove(struct lm_device *dev)
 {
 	struct impd1_module *impd1 = lm_get_drvdata(dev);
-	int i;
 
 	device_for_each_child(&dev->dev, NULL, impd1_remove_one);
-
-	for (i = 0; i < ARRAY_SIZE(impd1->clks); i++)
-		clkdev_drop(impd1->clks[i]);
+	integrator_impd1_clk_exit(dev->id);
 
 	lm_set_drvdata(dev, NULL);
 

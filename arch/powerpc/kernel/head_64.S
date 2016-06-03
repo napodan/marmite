@@ -32,14 +32,15 @@
 #include <asm/cputable.h>
 #include <asm/setup.h>
 #include <asm/hvcall.h>
-#include <asm/iseries/lpar_map.h>
 #include <asm/thread_info.h>
 #include <asm/firmware.h>
 #include <asm/page_64.h>
 #include <asm/irqflags.h>
 #include <asm/kvm_book3s_asm.h>
+#include <asm/ptrace.h>
+#include <asm/hw_irq.h>
 
-/* The physical memory is layed out such that the secondary processor
+/* The physical memory is laid out such that the secondary processor
  * spin code sits at 0x0000...0x00ff. On server, the vectors follow
  * using the layout described in exceptions-64s.S
  */
@@ -50,10 +51,11 @@
  *  For pSeries or server processors:
  *   1. The MMU is off & open firmware is running in real mode.
  *   2. The kernel is entered at __start
- *
- *  For iSeries:
- *   1. The MMU is on (as it always is for iSeries)
- *   2. The kernel is entered at system_reset_iSeries
+ * -or- For OPAL entry:
+ *   1. The MMU is off, processor in HV mode, primary CPU enters at 0
+ *      with device-tree in gpr3. We also get OPAL base in r8 and
+ *	entry in r9 for debugging purposes
+ *   2. Secondary processors enter at 0x60 with PIR in gpr3
  *
  *  For Book3E processors:
  *   1. The MMU is on running in AS0 in a state defined in ePAPR
@@ -87,16 +89,7 @@ __secondary_hold_spinloop:
 __secondary_hold_acknowledge:
 	.llong	0x0
 
-#ifdef CONFIG_PPC_ISERIES
-	/*
-	 * At offset 0x20, there is a pointer to iSeries LPAR data.
-	 * This is required by the hypervisor
-	 */
-	. = 0x20
-	.llong hvReleaseData-KERNELBASE
-#endif /* CONFIG_PPC_ISERIES */
-
-#ifdef CONFIG_CRASH_DUMP
+#ifdef CONFIG_RELOCATABLE
 	/* This flag is set to 1 by a loader if the kernel should run
 	 * at the loaded address instead of the linked address.  This
 	 * is used by kexec-tools to keep the the kdump kernel in the
@@ -129,6 +122,8 @@ __secondary_hold:
 #endif
 	/* Grab our physical cpu number */
 	mr	r24,r3
+	/* stash r4 for book3e */
+	mr	r25,r4
 
 	/* Tell the master cpu we're here */
 	/* Relocation is off & we are located at an address less */
@@ -136,16 +131,33 @@ __secondary_hold:
 	std	r24,__secondary_hold_acknowledge-_stext(0)
 	sync
 
+	li	r26,0
+#ifdef CONFIG_PPC_BOOK3E
+	tovirt(r26,r26)
+#endif
 	/* All secondary cpus wait here until told to start. */
-100:	ld	r4,__secondary_hold_spinloop-_stext(0)
+100:	ld	r4,__secondary_hold_spinloop-_stext(r26)
 	cmpdi	0,r4,0
 	beq	100b
 
 #if defined(CONFIG_SMP) || defined(CONFIG_KEXEC)
+#ifdef CONFIG_PPC_BOOK3E
+	tovirt(r4,r4)
+#endif
 	ld	r4,0(r4)		/* deref function descriptor */
 	mtctr	r4
 	mr	r3,r24
+	/*
+	 * it may be the case that other platforms have r4 right to
+	 * begin with, this gives us some safety in case it is not
+	 */
+#ifdef CONFIG_PPC_BOOK3E
+	mr	r4,r25
+#else
 	li	r4,0
+#endif
+	/* Make sure that patched code is visible */
+	isync
 	bctr
 #else
 	BUG_OPCODE
@@ -166,12 +178,6 @@ exception_marker:
 #include "exceptions-64s.S"
 #endif
 
-/* KVM trampoline code needs to be close to the interrupt handlers */
-
-#ifdef CONFIG_KVM_BOOK3S_64_HANDLER
-#include "../kvm/book3s_rmhandlers.S"
-#endif
-
 _GLOBAL(generic_secondary_thread_init)
 	mr	r24,r3
 
@@ -180,6 +186,7 @@ _GLOBAL(generic_secondary_thread_init)
 
 	/* get a valid TOC pointer, wherever we're mapped at */
 	bl	.relative_toc
+	tovirt(r2,r2)
 
 #ifdef CONFIG_PPC_BOOK3E
 	/* Book3E initialization */
@@ -206,6 +213,7 @@ _GLOBAL(generic_secondary_smp_init)
 
 	/* get a valid TOC pointer, wherever we're mapped at */
 	bl	.relative_toc
+	tovirt(r2,r2)
 
 #ifdef CONFIG_PPC_BOOK3E
 	/* Book3E initialization */
@@ -221,19 +229,25 @@ generic_secondary_common_init:
 	 */
 	LOAD_REG_ADDR(r13, paca)	/* Load paca pointer		 */
 	ld	r13,0(r13)		/* Get base vaddr of paca array	 */
+#ifndef CONFIG_SMP
+	addi	r13,r13,PACA_SIZE	/* know r13 if used accidentally */
+	b	.kexec_wait		/* wait for next kernel if !SMP	 */
+#else
+	LOAD_REG_ADDR(r7, nr_cpu_ids)	/* Load nr_cpu_ids address       */
+	lwz	r7,0(r7)		/* also the max paca allocated 	 */
 	li	r5,0			/* logical cpu id                */
 1:	lhz	r6,PACAHWCPUID(r13)	/* Load HW procid from paca      */
 	cmpw	r6,r24			/* Compare to our id             */
 	beq	2f
 	addi	r13,r13,PACA_SIZE	/* Loop to next PACA on miss     */
 	addi	r5,r5,1
-	cmpwi	r5,NR_CPUS
+	cmpw	r5,r7			/* Check if more pacas exist     */
 	blt	1b
 
 	mr	r3,r24			/* not found, copy phys to r3	 */
 	b	.kexec_wait		/* next kernel might do better	 */
 
-2:	mtspr	SPRN_SPRG_PACA,r13	/* Save vaddr of paca in an SPRG */
+2:	SET_PACA(r13)
 #ifdef CONFIG_PPC_BOOK3E
 	addi	r12,r13,PACA_EXTLB	/* and TLB exc frame in another  */
 	mtspr	SPRN_SPRG_TLB_EXFRAME,r12
@@ -241,34 +255,39 @@ generic_secondary_common_init:
 
 	/* From now on, r24 is expected to be logical cpuid */
 	mr	r24,r5
-3:	HMT_LOW
-	lbz	r23,PACAPROCSTART(r13)	/* Test if this processor should */
-					/* start.			 */
-
-#ifndef CONFIG_SMP
-	b	3b			/* Never go on non-SMP		 */
-#else
-	cmpwi	0,r23,0
-	beq	3b			/* Loop until told to go	 */
-
-	sync				/* order paca.run and cur_cpu_spec */
 
 	/* See if we need to call a cpu state restore handler */
 	LOAD_REG_ADDR(r23, cur_cpu_spec)
 	ld	r23,0(r23)
 	ld	r23,CPU_SPEC_RESTORE(r23)
 	cmpdi	0,r23,0
-	beq	4f
+	beq	3f
 	ld	r23,0(r23)
 	mtctr	r23
 	bctrl
 
-4:	/* Create a temp kernel stack for use before relocation is on.	*/
+3:	LOAD_REG_ADDR(r3, spinning_secondaries) /* Decrement spinning_secondaries */
+	lwarx	r4,0,r3
+	subi	r4,r4,1
+	stwcx.	r4,0,r3
+	bne	3b
+	isync
+
+4:	HMT_LOW
+	lbz	r23,PACAPROCSTART(r13)	/* Test if this processor should */
+					/* start.			 */
+	cmpwi	0,r23,0
+	beq	4b			/* Loop until told to go	 */
+
+	sync				/* order paca.run and cur_cpu_spec */
+	isync				/* In case code patching happened */
+
+	/* Create a temp kernel stack for use before relocation is on.	*/
 	ld	r1,PACAEMERGSP(r13)
 	subi	r1,r1,STACK_FRAME_OVERHEAD
 
 	b	__secondary_start
-#endif
+#endif /* SMP */
 
 /*
  * Turn the MMU off.
@@ -323,6 +342,11 @@ _GLOBAL(__start_initialization_multiplatform)
 	/* Save parameters */
 	mr	r31,r3
 	mr	r30,r4
+#ifdef CONFIG_PPC_EARLY_DEBUG_OPAL
+	/* Save OPAL entry */
+	mr	r28,r8
+	mr	r29,r9
+#endif
 
 #ifdef CONFIG_PPC_BOOK3E
 	bl	.start_initialization_book3e
@@ -390,12 +414,10 @@ _STATIC(__after_prom_start)
 	/* process relocations for the final address of the kernel */
 	lis	r25,PAGE_OFFSET@highest	/* compute virtual base of kernel */
 	sldi	r25,r25,32
-#ifdef CONFIG_CRASH_DUMP
 	lwz	r7,__run_at_load-_stext(r26)
-	cmplwi	cr0,r7,1	/* kdump kernel ? - stay where we are */
+	cmplwi	cr0,r7,1	/* flagged to stay where we are ? */
 	bne	1f
 	add	r25,r25,r26
-#endif
 1:	mr	r3,r25
 	bl	.relocate
 #endif
@@ -419,7 +441,7 @@ _STATIC(__after_prom_start)
 	tovirt(r6,r6)			/* on booke, we already run at PAGE_OFFSET */
 #endif
 
-#ifdef CONFIG_CRASH_DUMP
+#ifdef CONFIG_RELOCATABLE
 /*
  * Check if the kernel has to be running as relocatable kernel based on the
  * variable __run_at_load, if it is set the kernel is treated as relocatable
@@ -429,7 +451,8 @@ _STATIC(__after_prom_start)
 	cmplwi	cr0,r7,1
 	bne	3f
 
-	li	r5,__end_interrupts - _stext	/* just copy interrupts */
+	/* just copy interrupts */
+	LOAD_REG_IMMEDIATE(r5, __end_interrupts - _stext)
 	b	5f
 3:
 #endif
@@ -444,6 +467,7 @@ _STATIC(__after_prom_start)
 	mtctr	r8
 	bctr
 
+.balign 8
 p_end:	.llong	_end - _stext
 
 4:	/* Now copy the rest of the kernel up to _end */
@@ -486,6 +510,7 @@ _GLOBAL(copy_and_flush)
 	sync
 	addi	r5,r5,8
 	addi	r6,r6,8
+	isync
 	blr
 
 .align 8
@@ -527,6 +552,7 @@ _GLOBAL(pmac_secondary_start)
 
 	/* get TOC pointer (real address) */
 	bl	.relative_toc
+	tovirt(r2,r2)
 
 	/* Copy some CPU settings from CPU 0 */
 	bl	.__restore_cpu_ppc970
@@ -541,7 +567,15 @@ _GLOBAL(pmac_secondary_start)
 	ld	r4,0(r4)		/* Get base vaddr of paca array	*/
 	mulli	r13,r24,PACA_SIZE	/* Calculate vaddr of right paca */
 	add	r13,r13,r4		/* for this processor.		*/
-	mtspr	SPRN_SPRG_PACA,r13	/* Save vaddr of paca in an SPRG*/
+	SET_PACA(r13)			/* Save vaddr of paca in an SPRG*/
+
+	/* Mark interrupts soft and hard disabled (they might be enabled
+	 * in the PACA when doing hotplug)
+	 */
+	li	r0,0
+	stb	r0,PACASOFTIRQEN(r13)
+	li	r0,PACA_IRQ_HARD_DIS
+	stb	r0,PACAIRQHAPPENED(r13)
 
 	/* Create a temp kernel stack for use before relocation is on.	*/
 	ld	r1,PACAEMERGSP(r13)
@@ -559,7 +593,7 @@ _GLOBAL(pmac_secondary_start)
  *   1. Processor number
  *   2. Segment table pointer (virtual address)
  * On entry the following are set:
- *   r1	       = stack pointer.  vaddr for iSeries, raddr (temp stack) for pSeries
+ *   r1	       = stack pointer (real addr of temp stack)
  *   r24       = cpu# (in Linux terms)
  *   r13       = paca virtual address
  *   SPRG_PACA = paca virtual address
@@ -572,7 +606,7 @@ __secondary_start:
 	/* Set thread priority to MEDIUM */
 	HMT_MEDIUM
 
-	/* Initialize the kernel stack.  Just a repeat for iSeries.	 */
+	/* Initialize the kernel stack */
 	LOAD_REG_ADDR(r3, current_set)
 	sldi	r28,r24,3		/* get current_set[cpu#]	 */
 	ldx	r14,r3,r28
@@ -592,20 +626,16 @@ __secondary_start:
 	li	r7,0
 	mtlr	r7
 
+	/* Mark interrupts soft and hard disabled (they might be enabled
+	 * in the PACA when doing hotplug)
+	 */
+	stb	r7,PACASOFTIRQEN(r13)
+	li	r0,PACA_IRQ_HARD_DIS
+	stb	r0,PACAIRQHAPPENED(r13)
+
 	/* enable MMU and jump to start_secondary */
 	LOAD_REG_ADDR(r3, .start_secondary_prolog)
 	LOAD_REG_IMMEDIATE(r4, MSR_KERNEL)
-#ifdef CONFIG_PPC_ISERIES
-BEGIN_FW_FTR_SECTION
-	ori	r4,r4,MSR_EE
-	li	r8,1
-	stb	r8,PACAHARDIRQEN(r13)
-END_FW_FTR_SECTION_IFSET(FW_FEATURE_ISERIES)
-#endif
-BEGIN_FW_FTR_SECTION
-	stb	r7,PACAHARDIRQEN(r13)
-END_FW_FTR_SECTION_IFCLR(FW_FEATURE_ISERIES)
-	stb	r7,PACASOFTIRQEN(r13)
 
 	mtspr	SPRN_SRR0,r3
 	mtspr	SPRN_SRR1,r4
@@ -645,7 +675,7 @@ _GLOBAL(enable_64b_mode)
 	oris	r11,r11,0x8000		/* CM bit set, we'll set ICM later */
 	mtmsr	r11
 #else /* CONFIG_PPC_BOOK3E */
-	li	r12,(MSR_SF | MSR_ISF)@highest
+	li	r12,(MSR_64BIT | MSR_ISF)@highest
 	sldi	r12,r12,48
 	or	r11,r11,r12
 	mtmsrd	r11
@@ -657,13 +687,20 @@ _GLOBAL(enable_64b_mode)
  * This puts the TOC pointer into r2, offset by 0x8000 (as expected
  * by the toolchain).  It computes the correct value for wherever we
  * are running at the moment, using position-independent code.
+ *
+ * Note: The compiler constructs pointers using offsets from the
+ * TOC in -mcmodel=medium mode. After we relocate to 0 but before
+ * the MMU is on we need our TOC to be a virtual address otherwise
+ * these pointers will be real addresses which may get stored and
+ * accessed later with the MMU on. We use tovirt() at the call
+ * sites to handle this.
  */
 _GLOBAL(relative_toc)
 	mflr	r0
 	bcl	20,31,$+4
-0:	mflr	r9
-	ld	r2,(p_toc - 0b)(r9)
-	add	r2,r2,r9
+0:	mflr	r11
+	ld	r2,(p_toc - 0b)(r11)
+	add	r2,r2,r11
 	mtlr	r0
 	blr
 
@@ -673,8 +710,9 @@ p_toc:	.llong	__toc_start + 0x8000 - 0b
  * This is where the main kernel code starts.
  */
 _INIT_STATIC(start_here_multiplatform)
-	/* set up the TOC (real address) */
-	bl	.relative_toc
+	/* set up the TOC */
+	bl      .relative_toc
+	tovirt(r2,r2)
 
 	/* Clear out the BSS. It may have been done in prom_init,
 	 * already but that's irrelevant since prom_init will soon
@@ -693,6 +731,13 @@ _INIT_STATIC(start_here_multiplatform)
 3:	stdu	r0,8(r8)
 	bdnz	3b
 4:
+
+#ifdef CONFIG_PPC_EARLY_DEBUG_OPAL
+	/* Setup OPAL entry */
+	LOAD_REG_ADDR(r11, opal)
+	std	r28,0(r11);
+	std	r29,8(r11);
+#endif
 
 #ifndef CONFIG_PPC_BOOK3E
 	mfmsr	r6
@@ -742,22 +787,18 @@ _INIT_GLOBAL(start_here_common)
 	/* Load the TOC (virtual address) */
 	ld	r2,PACATOC(r13)
 
+	/* Do more system initializations in virtual mode */
 	bl	.setup_system
 
-	/* Load up the kernel context */
-5:
-	li	r5,0
-	stb	r5,PACASOFTIRQEN(r13)	/* Soft Disabled */
-#ifdef CONFIG_PPC_ISERIES
-BEGIN_FW_FTR_SECTION
-	mfmsr	r5
-	ori	r5,r5,MSR_EE		/* Hard Enabled on iSeries*/
-	mtmsrd	r5
-	li	r5,1
-END_FW_FTR_SECTION_IFSET(FW_FEATURE_ISERIES)
-#endif
-	stb	r5,PACAHARDIRQEN(r13)	/* Hard Disabled on others */
+	/* Mark interrupts soft and hard disabled (they might be enabled
+	 * in the PACA when doing hotplug)
+	 */
+	li	r0,0
+	stb	r0,PACASOFTIRQEN(r13)
+	li	r0,PACA_IRQ_HARD_DIS
+	stb	r0,PACAIRQHAPPENED(r13)
 
+	/* Generic kernel entry */
 	bl	.start_kernel
 
 	/* Not reached */

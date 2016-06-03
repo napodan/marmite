@@ -181,7 +181,7 @@ static int bfin_set_hw_break(unsigned long addr, int len, enum kgdb_bptype type)
 		return -ENOSPC;
 	}
 
-	/* Becasue hardware data watchpoint impelemented in current
+	/* Because hardware data watchpoint impelemented in current
 	 * Blackfin can not trigger an exception event as the hardware
 	 * instrction watchpoint does, we ignaore all data watch point here.
 	 * They can be turned on easily after future blackfin design
@@ -320,7 +320,7 @@ static void bfin_correct_hw_break(void)
 	}
 }
 
-void kgdb_disable_hw_debug(struct pt_regs *regs)
+static void bfin_disable_hw_debug(struct pt_regs *regs)
 {
 	/* Disable hardware debugging while we are in kgdb */
 	bfin_write_WPIACTL(0);
@@ -329,6 +329,9 @@ void kgdb_disable_hw_debug(struct pt_regs *regs)
 }
 
 #ifdef CONFIG_SMP
+extern void generic_exec_single(int cpu, struct call_single_data *data, int wait);
+static struct call_single_data kgdb_smp_ipi_data[NR_CPUS];
+
 void kgdb_passive_cpu_callback(void *info)
 {
 	kgdb_nmicallback(raw_smp_processor_id(), get_irq_regs());
@@ -336,14 +339,37 @@ void kgdb_passive_cpu_callback(void *info)
 
 void kgdb_roundup_cpus(unsigned long flags)
 {
-	smp_call_function(kgdb_passive_cpu_callback, NULL, 0);
+	unsigned int cpu;
+
+	for (cpu = cpumask_first(cpu_online_mask); cpu < nr_cpu_ids;
+		cpu = cpumask_next(cpu, cpu_online_mask)) {
+		kgdb_smp_ipi_data[cpu].func = kgdb_passive_cpu_callback;
+		generic_exec_single(cpu, &kgdb_smp_ipi_data[cpu], 0);
+	}
 }
 
 void kgdb_roundup_cpu(int cpu, unsigned long flags)
 {
-	smp_call_function_single(cpu, kgdb_passive_cpu_callback, NULL, 0);
+	generic_exec_single(cpu, &kgdb_smp_ipi_data[cpu], 0);
 }
 #endif
+
+#ifdef CONFIG_IPIPE
+static unsigned long kgdb_arch_imask;
+#endif
+
+void kgdb_post_primary_code(struct pt_regs *regs, int e_vector, int err_code)
+{
+	if (kgdb_single_step)
+		preempt_enable();
+
+#ifdef CONFIG_IPIPE
+	if (kgdb_arch_imask) {
+		cpu_pda[raw_smp_processor_id()].ex_imask = kgdb_arch_imask;
+		kgdb_arch_imask = 0;
+	}
+#endif
+}
 
 int kgdb_arch_handle_exception(int vector, int signo,
 			       int err_code, char *remcom_in_buffer,
@@ -388,6 +414,12 @@ int kgdb_arch_handle_exception(int vector, int signo,
 			 * kgdb_single_step > 0 means in single step mode
 			 */
 			kgdb_single_step = i + 1;
+
+			preempt_disable();
+#ifdef CONFIG_IPIPE
+			kgdb_arch_imask = cpu_pda[raw_smp_processor_id()].ex_imask;
+			cpu_pda[raw_smp_processor_id()].ex_imask = 0;
+#endif
 		}
 
 		bfin_correct_hw_break();
@@ -399,13 +431,10 @@ int kgdb_arch_handle_exception(int vector, int signo,
 
 struct kgdb_arch arch_kgdb_ops = {
 	.gdb_bpt_instr = {0xa1},
-#ifdef CONFIG_SMP
-	.flags = KGDB_HW_BREAKPOINT|KGDB_THR_PROC_SWAP,
-#else
 	.flags = KGDB_HW_BREAKPOINT,
-#endif
 	.set_hw_breakpoint = bfin_set_hw_break,
 	.remove_hw_breakpoint = bfin_remove_hw_break,
+	.disable_hw_break = bfin_disable_hw_debug,
 	.remove_all_hw_break = bfin_remove_all_hw_break,
 	.correct_hw_break = bfin_correct_hw_break,
 };
@@ -447,6 +476,9 @@ void kgdb_arch_set_pc(struct pt_regs *regs, unsigned long ip)
 int kgdb_arch_init(void)
 {
 	kgdb_single_step = 0;
+#ifdef CONFIG_IPIPE
+	kgdb_arch_imask = 0;
+#endif
 
 	bfin_remove_all_hw_break();
 	return 0;

@@ -16,7 +16,7 @@
 #include <asm/cpu.h>
 #include <asm/fpu.h>
 #include <asm/mipsregs.h>
-#include <asm/system.h>
+#include <asm/setup.h>
 
 static char bug64hit[] __initdata =
 	"reliable operation impossible!\n%s";
@@ -73,7 +73,7 @@ static inline void mult_sh_align_mod(long *v1, long *v2, long *w,
 		: "0" (5), "1" (8), "2" (5));
 	align_mod(align, mod);
 	/*
-	 * The trailing nop is needed to fullfill the two-instruction
+	 * The trailing nop is needed to fulfill the two-instruction
 	 * requirement between reading hi/lo and staring a mult/div.
 	 * Leaving it out may cause gas insert a nop itself breaking
 	 * the desired alignment of the next chunk.
@@ -84,9 +84,9 @@ static inline void mult_sh_align_mod(long *v1, long *v2, long *w,
 		".set	noreorder\n\t"
 		".set	nomacro\n\t"
 		"mult	%2, %3\n\t"
-		"dsll32	%0, %4, %5\n\t"
+		"dsll32 %0, %4, %5\n\t"
 		"mflo	$0\n\t"
-		"dsll32	%1, %4, %5\n\t"
+		"dsll32 %1, %4, %5\n\t"
 		"nop\n\t"
 		".set	pop"
 		: "=&r" (lv1), "=r" (lw)
@@ -239,7 +239,7 @@ static inline void check_daddi(void)
 	panic(bug64hit, !DADDI_WAR ? daddiwar : nowar);
 }
 
-int daddiu_bug __cpuinitdata = -1;
+int daddiu_bug	= -1;
 
 static inline void check_daddiu(void)
 {
@@ -273,7 +273,7 @@ static inline void check_daddiu(void)
 #ifdef HAVE_AS_SET_DADDI
 		".set	daddi\n\t"
 #endif
-		"daddiu	%0, %2, %4\n\t"
+		"daddiu %0, %2, %4\n\t"
 		"addiu	%1, $0, %4\n\t"
 		"daddu	%1, %2\n\t"
 		".set	pop"
@@ -292,7 +292,7 @@ static inline void check_daddiu(void)
 	asm volatile(
 		"addiu	%2, $0, %3\n\t"
 		"dsrl	%2, %2, 1\n\t"
-		"daddiu	%0, %2, %4\n\t"
+		"daddiu %0, %2, %4\n\t"
 		"addiu	%1, $0, %4\n\t"
 		"daddu	%1, %2"
 		: "=&r" (v), "=&r" (w), "=&r" (tmp)

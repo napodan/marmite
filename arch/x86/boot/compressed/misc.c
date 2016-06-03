@@ -9,23 +9,7 @@
  * High loaded stuff by Hans Lermen & Werner Almesberger, Feb. 1996
  */
 
-/*
- * we have to be careful, because no indirections are allowed here, and
- * paravirt_ops is a kind of one. As it will only run in baremetal anyway,
- * we just keep it from happening
- */
-#undef CONFIG_PARAVIRT
-#ifdef CONFIG_X86_32
-#define _ASM_X86_DESC_H 1
-#endif
-
-#include <linux/linkage.h>
-#include <linux/screen_info.h>
-#include <linux/elf.h>
-#include <linux/io.h>
-#include <asm/page.h>
-#include <asm/boot.h>
-#include <asm/bootparam.h>
+#include "misc.h"
 
 /* WARNING!!
  * This code is compiled with -fPIC and it is relocated dynamically
@@ -123,14 +107,10 @@ static void error(char *m);
 /*
  * This is set up by the setup-routine at boot-time
  */
-static struct boot_params *real_mode;		/* Pointer to real-mode data */
-static int quiet;
+struct boot_params *real_mode;		/* Pointer to real-mode data */
 
 void *memset(void *s, int c, size_t n);
 void *memcpy(void *dest, const void *src, size_t n);
-
-static void __putstr(int, const char *);
-#define putstr(__x)  __putstr(0, __x)
 
 #ifdef CONFIG_X86_64
 #define memptr long
@@ -157,6 +137,10 @@ static int lines, cols;
 #include "../../../../lib/decompress_unlzma.c"
 #endif
 
+#ifdef CONFIG_KERNEL_XZ
+#include "../../../../lib/decompress_unxz.c"
+#endif
+
 #ifdef CONFIG_KERNEL_LZO
 #include "../../../../lib/decompress_unlzo.c"
 #endif
@@ -170,15 +154,33 @@ static void scroll(void)
 		vidmem[i] = ' ';
 }
 
-static void __putstr(int error, const char *s)
+#define XMTRDY          0x20
+
+#define TXR             0       /*  Transmit register (WRITE) */
+#define LSR             5       /*  Line Status               */
+static void serial_putchar(int ch)
+{
+	unsigned timeout = 0xffff;
+
+	while ((inb(early_serial_base + LSR) & XMTRDY) == 0 && --timeout)
+		cpu_relax();
+
+	outb(ch, early_serial_base + TXR);
+}
+
+void __putstr(const char *s)
 {
 	int x, y, pos;
 	char c;
 
-#ifndef CONFIG_X86_VERBOSE_BOOTUP
-	if (!error)
-		return;
-#endif
+	if (early_serial_base) {
+		const char *str = s;
+		while (*str) {
+			if (*str == '\n')
+				serial_putchar('\r');
+			serial_putchar(*str++);
+		}
+	}
 
 	if (real_mode->screen_info.orig_video_mode == 0 &&
 	    lines == 0 && cols == 0)
@@ -225,24 +227,41 @@ void *memset(void *s, int c, size_t n)
 		ss[i] = c;
 	return s;
 }
-
+#ifdef CONFIG_X86_32
 void *memcpy(void *dest, const void *src, size_t n)
 {
-	int i;
-	const char *s = src;
-	char *d = dest;
+	int d0, d1, d2;
+	asm volatile(
+		"rep ; movsl\n\t"
+		"movl %4,%%ecx\n\t"
+		"rep ; movsb\n\t"
+		: "=&c" (d0), "=&D" (d1), "=&S" (d2)
+		: "0" (n >> 2), "g" (n & 3), "1" (dest), "2" (src)
+		: "memory");
 
-	for (i = 0; i < n; i++)
-		d[i] = s[i];
 	return dest;
 }
+#else
+void *memcpy(void *dest, const void *src, size_t n)
+{
+	long d0, d1, d2;
+	asm volatile(
+		"rep ; movsq\n\t"
+		"movq %4,%%rcx\n\t"
+		"rep ; movsb\n\t"
+		: "=&c" (d0), "=&D" (d1), "=&S" (d2)
+		: "0" (n >> 3), "g" (n & 7), "1" (dest), "2" (src)
+		: "memory");
 
+	return dest;
+}
+#endif
 
 static void error(char *x)
 {
-	__putstr(1, "\n\n");
-	__putstr(1, x);
-	__putstr(1, "\n\n -- System halted");
+	error_putstr("\n\n");
+	error_putstr(x);
+	error_putstr("\n\n -- System halted");
 
 	while (1)
 		asm("hlt");
@@ -269,8 +288,7 @@ static void parse_elf(void *output)
 		return;
 	}
 
-	if (!quiet)
-		putstr("Parsing ELF... ");
+	debug_putstr("Parsing ELF... ");
 
 	phdrs = malloc(sizeof(*phdrs) * ehdr.e_phnum);
 	if (!phdrs)
@@ -296,6 +314,8 @@ static void parse_elf(void *output)
 		default: /* Ignore other PT_* */ break;
 		}
 	}
+
+	free(phdrs);
 }
 
 asmlinkage void decompress_kernel(void *rmode, memptr heap,
@@ -305,8 +325,7 @@ asmlinkage void decompress_kernel(void *rmode, memptr heap,
 {
 	real_mode = rmode;
 
-	if (real_mode->hdr.loadflags & QUIET_FLAG)
-		quiet = 1;
+	sanitize_boot_params(real_mode);
 
 	if (real_mode->screen_info.orig_video_mode == 7) {
 		vidmem = (char *) 0xb0000;
@@ -319,6 +338,9 @@ asmlinkage void decompress_kernel(void *rmode, memptr heap,
 	lines = real_mode->screen_info.orig_video_lines;
 	cols = real_mode->screen_info.orig_video_cols;
 
+	console_init();
+	debug_putstr("early console in decompress_kernel\n");
+
 	free_mem_ptr     = heap;	/* Heap */
 	free_mem_end_ptr = heap + BOOT_HEAP_SIZE;
 
@@ -328,7 +350,7 @@ asmlinkage void decompress_kernel(void *rmode, memptr heap,
 	if (heap > 0x3fffffffffffUL)
 		error("Destination address too large");
 #else
-	if (heap > ((-__PAGE_OFFSET-(512<<20)-1) & 0x7fffffff))
+	if (heap > ((-__PAGE_OFFSET-(128<<20)-1) & 0x7fffffff))
 		error("Destination address too large");
 #endif
 #ifndef CONFIG_RELOCATABLE
@@ -336,11 +358,9 @@ asmlinkage void decompress_kernel(void *rmode, memptr heap,
 		error("Wrong destination address");
 #endif
 
-	if (!quiet)
-		putstr("\nDecompressing Linux... ");
+	debug_putstr("\nDecompressing Linux... ");
 	decompress(input_data, input_len, NULL, NULL, output, NULL, error);
 	parse_elf(output);
-	if (!quiet)
-		putstr("done.\nBooting the kernel.\n");
+	debug_putstr("done.\nBooting the kernel.\n");
 	return;
 }

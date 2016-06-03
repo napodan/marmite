@@ -15,7 +15,7 @@
 #include <linux/delay.h>
 #include <linux/netdevice.h>
 #include <linux/notifier.h>
-#include <linux/sysdev.h>
+#include <linux/device.h>
 #include <linux/ethtool.h>
 #include <linux/param.h>
 #include <linux/ptrace.h>
@@ -301,7 +301,7 @@ void __init tx4939_sio_init(unsigned int sclk, unsigned int cts_mask)
 	unsigned int ch_mask = 0;
 	__u64 pcfg = __raw_readq(&tx4939_ccfgptr->pcfg);
 
-	cts_mask |= ~1;	/* only SIO0 have RTS/CTS */
+	cts_mask |= ~1; /* only SIO0 have RTS/CTS */
 	if ((pcfg & TX4939_PCFG_SIO2MODE_MASK) != TX4939_PCFG_SIO2MODE_SIO0)
 		cts_mask |= 1 << 0; /* disable SIO0 RTS/CTS by PCFG setting */
 	if ((pcfg & TX4939_PCFG_SIO2MODE_MASK) != TX4939_PCFG_SIO2MODE_SIO2)
@@ -317,20 +317,16 @@ void __init tx4939_sio_init(unsigned int sclk, unsigned int cts_mask)
 	}
 }
 
-#if defined(CONFIG_TC35815) || defined(CONFIG_TC35815_MODULE)
-static int tx4939_get_eth_speed(struct net_device *dev)
+#if IS_ENABLED(CONFIG_TC35815)
+static u32 tx4939_get_eth_speed(struct net_device *dev)
 {
-	struct ethtool_cmd cmd = { ETHTOOL_GSET };
-	int speed = 100;	/* default 100Mbps */
-	int err;
-	if (!dev->ethtool_ops || !dev->ethtool_ops->get_settings)
-		return speed;
-	err = dev->ethtool_ops->get_settings(dev, &cmd);
-	if (err < 0)
-		return speed;
-	speed = cmd.speed == SPEED_100 ? 100 : 10;
-	return speed;
+	struct ethtool_cmd cmd;
+	if (__ethtool_get_settings(dev, &cmd))
+		return 100;	/* default 100Mbps */
+
+	return ethtool_cmd_speed(&cmd);
 }
+
 static int tx4939_netdev_event(struct notifier_block *this,
 			       unsigned long event,
 			       void *ptr)
@@ -343,8 +339,7 @@ static int tx4939_netdev_event(struct notifier_block *this,
 		else if (dev->irq == TXX9_IRQ_BASE + TX4939_IR_ETH(1))
 			bit = TX4939_PCFG_SPEED1;
 		if (bit) {
-			int speed = tx4939_get_eth_speed(dev);
-			if (speed == 100)
+			if (tx4939_get_eth_speed(dev) == 100)
 				txx9_set64(&tx4939_ccfgptr->pcfg, bit);
 			else
 				txx9_clear64(&tx4939_ccfgptr->pcfg, bit);
@@ -383,7 +378,7 @@ void __init tx4939_mtd_init(int ch)
 	unsigned long size = txx9_ce_res[ch].end - start + 1;
 
 	if (!(TX4939_EBUSC_CR(ch) & 0x8))
-		return;	/* disabled */
+		return; /* disabled */
 	txx9_physmap_flash_init(ch, start, size, &pdata);
 }
 

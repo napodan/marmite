@@ -15,6 +15,7 @@
 #include <asm/page.h>
 #include <asm/processor.h>	/* For TASK_SIZE */
 #include <asm/machvec.h>
+#include <asm/setup.h>
 
 struct mm_struct;
 struct vm_area_struct;
@@ -318,9 +319,7 @@ extern inline pte_t * pte_offset_kernel(pmd_t * dir, unsigned long address)
 }
 
 #define pte_offset_map(dir,addr)	pte_offset_kernel((dir),(addr))
-#define pte_offset_map_nested(dir,addr)	pte_offset_kernel((dir),(addr))
 #define pte_unmap(pte)			do { } while (0)
-#define pte_unmap_nested(pte)		do { } while (0)
 
 extern pgd_t swapper_pg_dir[1024];
 
@@ -354,9 +353,6 @@ extern inline pte_t mk_swap_pte(unsigned long type, unsigned long offset)
 #ifndef CONFIG_DISCONTIGMEM
 #define kern_addr_valid(addr)	(1)
 #endif
-
-#define io_remap_pfn_range(vma, start, pfn, size, prot)	\
-		remap_pfn_range(vma, start, pfn, size, prot)
 
 #define pte_ERROR(e) \
 	printk("%s:%d: bad pte %016lx.\n", __FILE__, __LINE__, pte_val(e))

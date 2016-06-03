@@ -434,7 +434,7 @@ typedef unsigned long mfp_cfg_t;
  *
  * mfp_init_addr() - accepts a table of "mfp_addr_map" structure, which
  * represents a range of MFP pins from "start" to "end", with the offset
- * begining at "offset", to define a single pin, let "end" = -1.
+ * beginning at "offset", to define a single pin, let "end" = -1.
  *
  * use
  *
@@ -456,7 +456,7 @@ struct mfp_addr_map {
 
 #define MFP_ADDR_END	{ MFP_PIN_INVALID, 0 }
 
-void __init mfp_init_base(unsigned long mfpr_base);
+void __init mfp_init_base(void __iomem *mfpr_base);
 void __init mfp_init_addr(struct mfp_addr_map *map);
 
 /*

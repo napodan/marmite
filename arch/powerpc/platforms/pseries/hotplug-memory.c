@@ -12,16 +12,74 @@
 #include <linux/of.h>
 #include <linux/memblock.h>
 #include <linux/vmalloc.h>
+#include <linux/memory.h>
+
 #include <asm/firmware.h>
 #include <asm/machdep.h>
-#include <asm/pSeries_reconfig.h>
 #include <asm/sparsemem.h>
 
+static unsigned long get_memblock_size(void)
+{
+	struct device_node *np;
+	unsigned int memblock_size = MIN_MEMORY_BLOCK_SIZE;
+	struct resource r;
+
+	np = of_find_node_by_path("/ibm,dynamic-reconfiguration-memory");
+	if (np) {
+		const __be64 *size;
+
+		size = of_get_property(np, "ibm,lmb-size", NULL);
+		if (size)
+			memblock_size = be64_to_cpup(size);
+		of_node_put(np);
+	} else  if (machine_is(pseries)) {
+		/* This fallback really only applies to pseries */
+		unsigned int memzero_size = 0;
+
+		np = of_find_node_by_path("/memory@0");
+		if (np) {
+			if (!of_address_to_resource(np, 0, &r))
+				memzero_size = resource_size(&r);
+			of_node_put(np);
+		}
+
+		if (memzero_size) {
+			/* We now know the size of memory@0, use this to find
+			 * the first memoryblock and get its size.
+			 */
+			char buf[64];
+
+			sprintf(buf, "/memory@%x", memzero_size);
+			np = of_find_node_by_path(buf);
+			if (np) {
+				if (!of_address_to_resource(np, 0, &r))
+					memblock_size = resource_size(&r);
+				of_node_put(np);
+			}
+		}
+	}
+	return memblock_size;
+}
+
+/* WARNING: This is going to override the generic definition whenever
+ * pseries is built-in regardless of what platform is active at boot
+ * time. This is fine for now as this is the only "option" and it
+ * should work everywhere. If not, we'll have to turn this into a
+ * ppc_md. callback
+ */
+unsigned long memory_block_size_bytes(void)
+{
+	return get_memblock_size();
+}
+
+#ifdef CONFIG_MEMORY_HOTREMOVE
 static int pseries_remove_memblock(unsigned long base, unsigned int memblock_size)
 {
 	unsigned long start, start_pfn;
 	struct zone *zone;
 	int ret;
+	unsigned long section;
+	unsigned long sections_to_remove;
 
 	start_pfn = base >> PAGE_SHIFT;
 
@@ -41,9 +99,13 @@ static int pseries_remove_memblock(unsigned long base, unsigned int memblock_siz
 	 * to sysfs "state" file and we can't remove sysfs entries
 	 * while writing to it. So we have to defer it to here.
 	 */
-	ret = __remove_pages(zone, start_pfn, memblock_size >> PAGE_SHIFT);
-	if (ret)
-		return ret;
+	sections_to_remove = (memblock_size >> PAGE_SHIFT) / PAGES_PER_SECTION;
+	for (section = 0; section < sections_to_remove; section++) {
+		unsigned long pfn = start_pfn + section * PAGES_PER_SECTION;
+		ret = __remove_pages(zone, pfn, PAGES_PER_SECTION);
+		if (ret)
+			return ret;
+	}
 
 	/*
 	 * Update memory regions for memory remove
@@ -92,6 +154,17 @@ static int pseries_remove_memory(struct device_node *np)
 	ret = pseries_remove_memblock(base, lmb_size);
 	return ret;
 }
+#else
+static inline int pseries_remove_memblock(unsigned long base,
+					  unsigned int memblock_size)
+{
+	return 0;
+}
+static inline int pseries_remove_memory(struct device_node *np)
+{
+	return -EOPNOTSUPP;
+}
+#endif /* CONFIG_MEMORY_HOTREMOVE */
 
 static int pseries_add_memory(struct device_node *np)
 {
@@ -125,59 +198,72 @@ static int pseries_add_memory(struct device_node *np)
 	return (ret < 0) ? -EINVAL : 0;
 }
 
-static int pseries_drconf_memory(unsigned long *base, unsigned int action)
+static int pseries_update_drconf_memory(struct of_prop_reconfig *pr)
 {
-	struct device_node *np;
-	const unsigned long *lmb_size;
-	int rc;
+	struct of_drconf_cell *new_drmem, *old_drmem;
+	unsigned long memblock_size;
+	u32 entries;
+	u32 *p;
+	int i, rc = -EINVAL;
 
-	np = of_find_node_by_path("/ibm,dynamic-reconfiguration-memory");
-	if (!np)
+	memblock_size = get_memblock_size();
+	if (!memblock_size)
 		return -EINVAL;
 
-	lmb_size = of_get_property(np, "ibm,lmb-size", NULL);
-	if (!lmb_size) {
-		of_node_put(np);
+	p = (u32 *)of_get_property(pr->dn, "ibm,dynamic-memory", NULL);
+	if (!p)
 		return -EINVAL;
+
+	/* The first int of the property is the number of lmb's described
+	 * by the property. This is followed by an array of of_drconf_cell
+	 * entries. Get the niumber of entries and skip to the array of
+	 * of_drconf_cell's.
+	 */
+	entries = *p++;
+	old_drmem = (struct of_drconf_cell *)p;
+
+	p = (u32 *)pr->prop->value;
+	p++;
+	new_drmem = (struct of_drconf_cell *)p;
+
+	for (i = 0; i < entries; i++) {
+		if ((old_drmem[i].flags & DRCONF_MEM_ASSIGNED) &&
+		    (!(new_drmem[i].flags & DRCONF_MEM_ASSIGNED))) {
+			rc = pseries_remove_memblock(old_drmem[i].base_addr,
+						     memblock_size);
+			break;
+		} else if ((!(old_drmem[i].flags & DRCONF_MEM_ASSIGNED)) &&
+			   (new_drmem[i].flags & DRCONF_MEM_ASSIGNED)) {
+			rc = memblock_add(old_drmem[i].base_addr,
+					  memblock_size);
+			rc = (rc < 0) ? -EINVAL : 0;
+			break;
+		}
 	}
 
-	if (action == PSERIES_DRCONF_MEM_ADD) {
-		rc = memblock_add(*base, *lmb_size);
-		rc = (rc < 0) ? -EINVAL : 0;
-	} else if (action == PSERIES_DRCONF_MEM_REMOVE) {
-		rc = pseries_remove_memblock(*base, *lmb_size);
-	} else {
-		rc = -EINVAL;
-	}
-
-	of_node_put(np);
 	return rc;
 }
 
 static int pseries_memory_notifier(struct notifier_block *nb,
-				unsigned long action, void *node)
+				   unsigned long action, void *node)
 {
-	int err = NOTIFY_OK;
+	struct of_prop_reconfig *pr;
+	int err = 0;
 
 	switch (action) {
-	case PSERIES_RECONFIG_ADD:
-		if (pseries_add_memory(node))
-			err = NOTIFY_BAD;
+	case OF_RECONFIG_ATTACH_NODE:
+		err = pseries_add_memory(node);
 		break;
-	case PSERIES_RECONFIG_REMOVE:
-		if (pseries_remove_memory(node))
-			err = NOTIFY_BAD;
+	case OF_RECONFIG_DETACH_NODE:
+		err = pseries_remove_memory(node);
 		break;
-	case PSERIES_DRCONF_MEM_ADD:
-	case PSERIES_DRCONF_MEM_REMOVE:
-		if (pseries_drconf_memory(node, action))
-			err = NOTIFY_BAD;
-		break;
-	default:
-		err = NOTIFY_DONE;
+	case OF_RECONFIG_UPDATE_PROPERTY:
+		pr = (struct of_prop_reconfig *)node;
+		if (!strcmp(pr->prop->name, "ibm,dynamic-memory"))
+			err = pseries_update_drconf_memory(pr);
 		break;
 	}
-	return err;
+	return notifier_from_errno(err);
 }
 
 static struct notifier_block pseries_mem_nb = {
@@ -187,7 +273,7 @@ static struct notifier_block pseries_mem_nb = {
 static int __init pseries_memory_hotplug_init(void)
 {
 	if (firmware_has_feature(FW_FEATURE_LPAR))
-		pSeries_reconfig_notifier_register(&pseries_mem_nb);
+		of_reconfig_notifier_register(&pseries_mem_nb);
 
 	return 0;
 }

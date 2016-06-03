@@ -21,8 +21,6 @@ void dma_free_coherent(struct device *dev, size_t size, void *vaddr,
 #define dma_alloc_noncoherent(d, s, h, f) dma_alloc_coherent(d, s, h, f)
 #define dma_free_noncoherent(d, s, v, h) dma_free_coherent(d, s, v, h)
 #define dma_supported(d, m)         (1)
-#define dma_get_cache_alignment()   (32)
-#define dma_is_consistent(d, h)     (1)
 
 static inline int
 dma_set_mask(struct device *dev, u64 dma_mask)
@@ -155,5 +153,15 @@ dma_cache_sync(struct device *dev, void *vaddr, size_t size,
 {
 	_dma_sync((dma_addr_t)vaddr, size, dir);
 }
+
+/* drivers/base/dma-mapping.c */
+extern int dma_common_mmap(struct device *dev, struct vm_area_struct *vma,
+			   void *cpu_addr, dma_addr_t dma_addr, size_t size);
+extern int dma_common_get_sgtable(struct device *dev, struct sg_table *sgt,
+				  void *cpu_addr, dma_addr_t dma_addr,
+				  size_t size);
+
+#define dma_mmap_coherent(d, v, c, h, s) dma_common_mmap(d, v, c, h, s)
+#define dma_get_sgtable(d, t, v, h, s) dma_common_get_sgtable(d, t, v, h, s)
 
 #endif				/* _BLACKFIN_DMA_MAPPING_H */

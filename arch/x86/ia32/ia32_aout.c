@@ -26,7 +26,6 @@
 #include <linux/init.h>
 #include <linux/jiffies.h>
 
-#include <asm/system.h>
 #include <asm/uaccess.h>
 #include <asm/pgalloc.h>
 #include <asm/cacheflush.h>
@@ -34,9 +33,9 @@
 #include <asm/ia32.h>
 
 #undef WARN_OLD
-#undef CORE_DUMP /* probably broken */
+#undef CORE_DUMP /* definitely broken */
 
-static int load_aout_binary(struct linux_binprm *, struct pt_regs *regs);
+static int load_aout_binary(struct linux_binprm *);
 static int load_aout_library(struct file *);
 
 #ifdef CORE_DUMP
@@ -120,9 +119,7 @@ static void set_brk(unsigned long start, unsigned long end)
 	end = PAGE_ALIGN(end);
 	if (end <= start)
 		return;
-	down_write(&current->mm->mmap_sem);
-	do_brk(start, end - start);
-	up_write(&current->mm->mmap_sem);
+	vm_brk(start, end - start);
 }
 
 #ifdef CORE_DUMP
@@ -131,21 +128,15 @@ static void set_brk(unsigned long start, unsigned long end)
  * macros to write out all the necessary info.
  */
 
-static int dump_write(struct file *file, const void *addr, int nr)
-{
-	return file->f_op->write(file, addr, nr, &file->f_pos) == nr;
-}
+#include <linux/coredump.h>
 
 #define DUMP_WRITE(addr, nr)			     \
 	if (!dump_write(file, (void *)(addr), (nr))) \
 		goto end_coredump;
 
-#define DUMP_SEEK(offset)						\
-	if (file->f_op->llseek) {					\
-		if (file->f_op->llseek(file, (offset), 0) != (offset))	\
-			goto end_coredump;				\
-	} else								\
-		file->f_pos = (offset)
+#define DUMP_SEEK(offset)		\
+	if (!dump_seek(file, offset))	\
+		goto end_coredump;
 
 #define START_DATA()	(u.u_tsize << PAGE_SHIFT)
 #define START_STACK(u)	(u.start_stack)
@@ -171,7 +162,6 @@ static int aout_core_dump(long signr, struct pt_regs *regs, struct file *file,
 	fs = get_fs();
 	set_fs(KERNEL_DS);
 	has_dumped = 1;
-	current->flags |= PF_DUMPCORE;
 	strncpy(dump.u_comm, current->comm, sizeof(current->comm));
 	dump.u_ar0 = offsetof(struct user32, regs);
 	dump.signal = signr;
@@ -202,7 +192,7 @@ static int aout_core_dump(long signr, struct pt_regs *regs, struct file *file,
 	/* struct user */
 	DUMP_WRITE(&dump, sizeof(dump));
 	/* Now dump all of the user data.  Include malloced stuff as well */
-	DUMP_SEEK(PAGE_SIZE);
+	DUMP_SEEK(PAGE_SIZE - sizeof(dump));
 	/* now we start writing out the user space info */
 	set_fs(USER_DS);
 	/* Dump the data area */
@@ -217,12 +207,6 @@ static int aout_core_dump(long signr, struct pt_regs *regs, struct file *file,
 		dump_size = dump.u_ssize << PAGE_SHIFT;
 		DUMP_WRITE(dump_start, dump_size);
 	}
-	/*
-	 * Finally dump the task struct.  Not be used by gdb, but
-	 * could be useful
-	 */
-	set_fs(KERNEL_DS);
-	DUMP_WRITE(current, sizeof(*current));
 end_coredump:
 	set_fs(fs);
 	return has_dumped;
@@ -275,9 +259,10 @@ static u32 __user *create_aout_tables(char __user *p, struct linux_binprm *bprm)
  * These are the functions used to load a.out style executables and shared
  * libraries.  There is no binary dependent code anywhere else.
  */
-static int load_aout_binary(struct linux_binprm *bprm, struct pt_regs *regs)
+static int load_aout_binary(struct linux_binprm *bprm)
 {
 	unsigned long error, fd_offset, rlim;
+	struct pt_regs *regs = current_pt_regs();
 	struct exec ex;
 	int retval;
 
@@ -285,7 +270,7 @@ static int load_aout_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 	if ((N_MAGIC(ex) != ZMAGIC && N_MAGIC(ex) != OMAGIC &&
 	     N_MAGIC(ex) != QMAGIC && N_MAGIC(ex) != NMAGIC) ||
 	    N_TRSIZE(ex) || N_DRSIZE(ex) ||
-	    i_size_read(bprm->file->f_path.dentry->d_inode) <
+	    i_size_read(file_inode(bprm->file)) <
 	    ex.a_text+ex.a_data+N_SYMSIZE(ex)+N_TXTOFF(ex)) {
 		return -ENOEXEC;
 	}
@@ -309,7 +294,7 @@ static int load_aout_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 
 	/* OK, This is the point of no return */
 	set_personality(PER_LINUX);
-	set_thread_flag(TIF_IA32);
+	set_personality_ia32(false);
 
 	setup_new_exec(bprm);
 
@@ -323,39 +308,35 @@ static int load_aout_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 		(current->mm->start_data = N_DATADDR(ex));
 	current->mm->brk = ex.a_bss +
 		(current->mm->start_brk = N_BSSADDR(ex));
-	current->mm->free_area_cache = TASK_UNMAPPED_BASE;
-	current->mm->cached_hole_size = 0;
+
+	retval = setup_arg_pages(bprm, IA32_STACK_TOP, EXSTACK_DEFAULT);
+	if (retval < 0) {
+		/* Someone check-me: is this error path enough? */
+		send_sig(SIGKILL, current, 0);
+		return retval;
+	}
 
 	install_exec_creds(bprm);
-	current->flags &= ~PF_FORKNOEXEC;
 
 	if (N_MAGIC(ex) == OMAGIC) {
 		unsigned long text_addr, map_size;
-		loff_t pos;
 
 		text_addr = N_TXTADDR(ex);
-
-		pos = 32;
 		map_size = ex.a_text+ex.a_data;
 
-		down_write(&current->mm->mmap_sem);
-		error = do_brk(text_addr & PAGE_MASK, map_size);
-		up_write(&current->mm->mmap_sem);
+		error = vm_brk(text_addr & PAGE_MASK, map_size);
 
 		if (error != (text_addr & PAGE_MASK)) {
 			send_sig(SIGKILL, current, 0);
 			return error;
 		}
 
-		error = bprm->file->f_op->read(bprm->file,
-			 (char __user *)text_addr,
-			  ex.a_text+ex.a_data, &pos);
+		error = read_code(bprm->file, text_addr, 32,
+				  ex.a_text + ex.a_data);
 		if ((signed long)error < 0) {
 			send_sig(SIGKILL, current, 0);
 			return error;
 		}
-
-		flush_icache_range(text_addr, text_addr+ex.a_text+ex.a_data);
 	} else {
 #ifdef WARN_OLD
 		static unsigned long error_time, error_time2;
@@ -377,40 +358,28 @@ static int load_aout_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 #endif
 
 		if (!bprm->file->f_op->mmap || (fd_offset & ~PAGE_MASK) != 0) {
-			loff_t pos = fd_offset;
-
-			down_write(&current->mm->mmap_sem);
-			do_brk(N_TXTADDR(ex), ex.a_text+ex.a_data);
-			up_write(&current->mm->mmap_sem);
-			bprm->file->f_op->read(bprm->file,
-					(char __user *)N_TXTADDR(ex),
-					ex.a_text+ex.a_data, &pos);
-			flush_icache_range((unsigned long) N_TXTADDR(ex),
-					   (unsigned long) N_TXTADDR(ex) +
-					   ex.a_text+ex.a_data);
+			vm_brk(N_TXTADDR(ex), ex.a_text+ex.a_data);
+			read_code(bprm->file, N_TXTADDR(ex), fd_offset,
+					ex.a_text+ex.a_data);
 			goto beyond_if;
 		}
 
-		down_write(&current->mm->mmap_sem);
-		error = do_mmap(bprm->file, N_TXTADDR(ex), ex.a_text,
+		error = vm_mmap(bprm->file, N_TXTADDR(ex), ex.a_text,
 				PROT_READ | PROT_EXEC,
 				MAP_FIXED | MAP_PRIVATE | MAP_DENYWRITE |
 				MAP_EXECUTABLE | MAP_32BIT,
 				fd_offset);
-		up_write(&current->mm->mmap_sem);
 
 		if (error != N_TXTADDR(ex)) {
 			send_sig(SIGKILL, current, 0);
 			return error;
 		}
 
-		down_write(&current->mm->mmap_sem);
-		error = do_mmap(bprm->file, N_DATADDR(ex), ex.a_data,
+		error = vm_mmap(bprm->file, N_DATADDR(ex), ex.a_data,
 				PROT_READ | PROT_WRITE | PROT_EXEC,
 				MAP_FIXED | MAP_PRIVATE | MAP_DENYWRITE |
 				MAP_EXECUTABLE | MAP_32BIT,
 				fd_offset + ex.a_text);
-		up_write(&current->mm->mmap_sem);
 		if (error != N_DATADDR(ex)) {
 			send_sig(SIGKILL, current, 0);
 			return error;
@@ -420,13 +389,6 @@ beyond_if:
 	set_binfmt(&aout_format);
 
 	set_brk(current->mm->start_brk, current->mm->brk);
-
-	retval = setup_arg_pages(bprm, IA32_STACK_TOP, EXSTACK_DEFAULT);
-	if (retval < 0) {
-		/* Someone check-me: is this error path enough? */
-		send_sig(SIGKILL, current, 0);
-		return retval;
-	}
 
 	current->mm->start_stack =
 		(unsigned long)create_aout_tables((char __user *)bprm->p, bprm);
@@ -448,12 +410,10 @@ beyond_if:
 
 static int load_aout_library(struct file *file)
 {
-	struct inode *inode;
 	unsigned long bss, start_addr, len, error;
 	int retval;
 	struct exec ex;
 
-	inode = file->f_path.dentry->d_inode;
 
 	retval = -ENOEXEC;
 	error = kernel_read(file, 0, (char *) &ex, sizeof(ex));
@@ -463,7 +423,7 @@ static int load_aout_library(struct file *file)
 	/* We come in here for the regular a.out style of shared libraries */
 	if ((N_MAGIC(ex) != ZMAGIC && N_MAGIC(ex) != QMAGIC) || N_TRSIZE(ex) ||
 	    N_DRSIZE(ex) || ((ex.a_entry & 0xfff) && N_MAGIC(ex) == ZMAGIC) ||
-	    i_size_read(inode) <
+	    i_size_read(file_inode(file)) <
 	    ex.a_text+ex.a_data+N_SYMSIZE(ex)+N_TXTOFF(ex)) {
 		goto out;
 	}
@@ -477,8 +437,6 @@ static int load_aout_library(struct file *file)
 	start_addr =  ex.a_entry & 0xfffff000;
 
 	if ((N_TXTOFF(ex) & ~PAGE_MASK) != 0) {
-		loff_t pos = N_TXTOFF(ex);
-
 #ifdef WARN_OLD
 		static unsigned long error_time;
 		if (time_after(jiffies, error_time + 5*HZ)) {
@@ -489,26 +447,18 @@ static int load_aout_library(struct file *file)
 			error_time = jiffies;
 		}
 #endif
-		down_write(&current->mm->mmap_sem);
-		do_brk(start_addr, ex.a_text + ex.a_data + ex.a_bss);
-		up_write(&current->mm->mmap_sem);
+		vm_brk(start_addr, ex.a_text + ex.a_data + ex.a_bss);
 
-		file->f_op->read(file, (char __user *)start_addr,
-			ex.a_text + ex.a_data, &pos);
-		flush_icache_range((unsigned long) start_addr,
-				   (unsigned long) start_addr + ex.a_text +
-				   ex.a_data);
-
+		read_code(file, start_addr, N_TXTOFF(ex),
+			  ex.a_text + ex.a_data);
 		retval = 0;
 		goto out;
 	}
 	/* Now use mmap to map the library into memory. */
-	down_write(&current->mm->mmap_sem);
-	error = do_mmap(file, start_addr, ex.a_text + ex.a_data,
+	error = vm_mmap(file, start_addr, ex.a_text + ex.a_data,
 			PROT_READ | PROT_WRITE | PROT_EXEC,
 			MAP_FIXED | MAP_PRIVATE | MAP_DENYWRITE | MAP_32BIT,
 			N_TXTOFF(ex));
-	up_write(&current->mm->mmap_sem);
 	retval = error;
 	if (error != start_addr)
 		goto out;
@@ -516,9 +466,7 @@ static int load_aout_library(struct file *file)
 	len = PAGE_ALIGN(ex.a_text + ex.a_data);
 	bss = ex.a_text + ex.a_data + ex.a_bss;
 	if (bss > len) {
-		down_write(&current->mm->mmap_sem);
-		error = do_brk(start_addr + len, bss - len);
-		up_write(&current->mm->mmap_sem);
+		error = vm_brk(start_addr + len, bss - len);
 		retval = error;
 		if (error != start_addr + len)
 			goto out;
@@ -530,7 +478,8 @@ out:
 
 static int __init init_aout_binfmt(void)
 {
-	return register_binfmt(&aout_format);
+	register_binfmt(&aout_format);
+	return 0;
 }
 
 static void __exit exit_aout_binfmt(void)

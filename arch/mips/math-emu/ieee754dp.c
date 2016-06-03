@@ -4,7 +4,6 @@
 /*
  * MIPS floating point support
  * Copyright (C) 1994-2000 Algorithmics Ltd.
- * http://www.algor.co.uk
  *
  * ########################################################################
  *
@@ -117,7 +116,7 @@ static u64 get_rounding(int sn, u64 xm)
 				xm += 0x8;
 			break;
 		case IEEE754_RD:	/* toward -Infinity */
-			if (sn)	/* ?? */
+			if (sn) /* ?? */
 				xm += 0x8;
 			break;
 		}

@@ -11,22 +11,23 @@
 #ifndef _ASM_TIMEX_H
 #define _ASM_TIMEX_H
 
-#include <asm/hardirq.h>
 #include <unit/timex.h>
 
 #define TICK_SIZE (tick_nsec / 1000)
 
-#define CLOCK_TICK_RATE 1193180 /* Underlying HZ - this should probably be set
-				 * to something appropriate, but what? */
-
-extern cycles_t cacheflush_time;
+#define CLOCK_TICK_RATE MN10300_JCCLK /* Underlying HZ */
 
 #ifdef __KERNEL__
+
+extern cycles_t cacheflush_time;
 
 static inline cycles_t get_cycles(void)
 {
 	return read_timestamp_counter();
 }
+
+extern int init_clockevents(void);
+extern int init_clocksource(void);
 
 #endif /* __KERNEL__ */
 

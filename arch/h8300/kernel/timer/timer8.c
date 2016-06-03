@@ -61,7 +61,7 @@
 
 /*
  * timer_interrupt() needs to keep up the real-time clock,
- * as well as call the "do_timer()" routine every clocktick
+ * as well as call the "xtime_update()" routine every clocktick
  */
 
 static irqreturn_t timer_interrupt(int irq, void *dev_id)
@@ -77,7 +77,7 @@ static struct irqaction timer8_irq = {
 	.flags		= IRQF_DISABLED | IRQF_TIMER,
 };
 
-static const int __initdata divide_rate[] = {8, 64, 8192};
+static const int __initconst divide_rate[] = {8, 64, 8192};
 
 void __init h8300_timer_setup(void)
 {
@@ -94,7 +94,7 @@ void __init h8300_timer_setup(void)
 	ctrl_bclr(0, MSTPCRL)
 #endif
 
-	/* initalize timer */
+	/* initialize timer */
 	ctrl_outw(cnt, _8BASE + TCORA);
 	ctrl_outw(0x0000, _8BASE + _8TCSR);
 	ctrl_outw((CMIEA|CCLR_CMA|CKS2) << 8 | div,

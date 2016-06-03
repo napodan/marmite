@@ -19,15 +19,11 @@
 #include <asm/signal.h>
 #include <asm/io.h>
 #include <asm/delay.h>
-#include <asm/rtc.h>
 #include <asm/irq_regs.h>
 
 /* define this if you need to use print_timestamp */
 /* it will make jiffies at 96 hz instead of 100 hz though */
 #undef USE_CASCADE_TIMERS
-
-extern int set_rtc_mmss(unsigned long nowtime);
-extern int have_rtc;
 
 unsigned long get_ns_in_jiffie(void)
 {
@@ -59,68 +55,18 @@ unsigned long get_ns_in_jiffie(void)
 	return ns;
 }
 
-unsigned long do_slow_gettimeoffset(void)
+static u32 cris_v10_gettimeoffset(void)
 {
-	unsigned long count, t1;
-	unsigned long usec_count = 0;
-	unsigned short presc_count;
-
-	static unsigned long count_p = TIMER0_DIV;/* for the first call after boot */
-	static unsigned long jiffies_p = 0;
-
-	/*
-	 * cache volatile jiffies temporarily; we have IRQs turned off. 
-	 */
-	unsigned long jiffies_t;
+	u32 count;
 
 	/* The timer interrupt comes from Etrax timer 0. In order to get
 	 * better precision, we check the current value. It might have
 	 * underflowed already though.
 	 */
-
-#ifndef CONFIG_SVINTO_SIM
-	/* Not available in the xsim simulator. */
 	count = *R_TIMER0_DATA;
-	presc_count = *R_TIM_PRESC_STATUS;  
-	/* presc_count might be wrapped */
-	t1 = *R_TIMER0_DATA;
-	if (count != t1){
-		/* it wrapped, read prescaler again...  */
-		presc_count = *R_TIM_PRESC_STATUS;
-		count = t1;
-	}
-#else
-	count = 0;
-	presc_count = 0;
-#endif
 
- 	jiffies_t = jiffies;
-
-	/*
-	 * avoiding timer inconsistencies (they are rare, but they happen)...
-	 * there are one problem that must be avoided here:
-	 *  1. the timer counter underflows
-	 */
-	if( jiffies_t == jiffies_p ) {
-		if( count > count_p ) {
-			/* Timer wrapped, use new count and prescale 
-			 * increase the time corresponding to one jiffie
-			 */
-			usec_count = 1000000/HZ;
-		}
-	} else
-		jiffies_p = jiffies_t;
-        count_p = count;
-	if (presc_count >= PRESCALE_VALUE/2 ){
-		presc_count =  PRESCALE_VALUE - presc_count + PRESCALE_VALUE/2;
-	} else {
-		presc_count =  PRESCALE_VALUE - presc_count - PRESCALE_VALUE/2;
-	}
-	/* Convert timer value to usec */
-	usec_count += ( (TIMER0_DIV - count) * (1000000/HZ)/TIMER0_DIV ) +
-	              (( (presc_count) * (1000000000/PRESCALE_FREQ))/1000);
-
-	return usec_count;
+	/* Convert timer value to nsec */
+	return (TIMER0_DIV - count) * (NSEC_PER_SEC/HZ)/TIMER0_DIV;
 }
 
 /* Excerpt from the Etrax100 HSDD about the built-in watchdog:
@@ -190,7 +136,7 @@ stop_watchdog(void)
 
 /*
  * timer_interrupt() needs to keep up the real-time clock,
- * as well as call the "do_timer()" routine every clocktick
+ * as well as call the "xtime_update()" routine every clocktick
  */
 
 //static unsigned short myjiff; /* used by our debug routine print_timestamp */
@@ -226,7 +172,7 @@ timer_interrupt(int irq, void *dev_id)
 
 	/* call the real timer interrupt handler */
 
-	do_timer(1);
+	xtime_update(1);
 	
         cris_do_profile(regs); /* Save profiling information */
         return IRQ_HANDLED;
@@ -245,6 +191,8 @@ static struct irqaction irq2  = {
 void __init
 time_init(void)
 {	
+	arch_gettimeoffset = cris_v10_gettimeoffset;
+
 	/* probe for the RTC and read it if it exists 
 	 * Before the RTC can be probed the loops_per_usec variable needs 
 	 * to be initialized to make usleep work. A better value for 
@@ -252,11 +200,6 @@ time_init(void)
 	 * clock has started.  
 	 */
 	loops_per_usec = 50;
-
-	if(RTC_INIT() < 0)
-		have_rtc = 0;
-	else
-		have_rtc = 1;
 
 	/* Setup the etrax timers
 	 * Base frequency is 25000 hz, divider 250 -> 100 HZ

@@ -33,7 +33,7 @@
 #define GEMINI_LPC_HOST_BASE	0x47000000
 #define GEMINI_LPC_IO_BASE	0x47800000
 #define GEMINI_INTERRUPT_BASE	0x48000000
-/* TODO: Different interrupt controlers when SMP
+/* TODO: Different interrupt controllers when SMP
  * #define GEMINI_INTERRUPT0_BASE	0x48000000
  * #define GEMINI_INTERRUPT1_BASE	0x49000000
  */
@@ -69,6 +69,6 @@
 /*
  * macro to get at IO space when running virtually
  */
-#define IO_ADDRESS(x)	((((x) & 0xFFF00000) >> 4) | ((x) & 0x000FFFFF) | 0xF0000000)
+#define IO_ADDRESS(x)	IOMEM((((x) & 0xFFF00000) >> 4) | ((x) & 0x000FFFFF) | 0xF0000000)
 
 #endif

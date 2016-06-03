@@ -13,7 +13,6 @@
 #include <linux/linkage.h>
 #include <asm/page.h>
 #include <asm/types.h>
-#include <asm/ptrace.h>
 #include <asm/hw_breakpoint.h>
 
 /*
@@ -40,7 +39,7 @@
 /* This decides where the kernel will search for a free chunk of vm
  * space during mmap's.
  */
-#define TASK_UNMAPPED_BASE	(TASK_SIZE / 3)
+#define TASK_UNMAPPED_BASE	PAGE_ALIGN(TASK_SIZE / 3)
 
 /*
  * Bit of SR register
@@ -127,14 +126,6 @@ extern void start_thread(struct pt_regs *regs, unsigned long new_pc, unsigned lo
 /* Free all resources held by a thread. */
 extern void release_thread(struct task_struct *);
 
-/* Prepare to copy thread state - unlazy all lazy status */
-void prepare_to_copy(struct task_struct *tsk);
-
-/*
- * create a kernel thread without removing it from tasklists
- */
-extern int kernel_thread(int (*fn)(void *), void * arg, unsigned long flags);
-
 /* Copy and release all segment info associated with a VM */
 #define copy_segments(p, mm)	do { } while(0)
 #define release_segments(mm)	do { } while(0)
@@ -194,18 +185,21 @@ extern unsigned long get_wchan(struct task_struct *p);
 #define KSTK_EIP(tsk)  (task_pt_regs(tsk)->pc)
 #define KSTK_ESP(tsk)  (task_pt_regs(tsk)->regs[15])
 
-#define user_stack_pointer(_regs)	((_regs)->regs[15])
-
 #if defined(CONFIG_CPU_SH2A) || defined(CONFIG_CPU_SH4)
+
 #define PREFETCH_STRIDE		L1_CACHE_BYTES
 #define ARCH_HAS_PREFETCH
 #define ARCH_HAS_PREFETCHW
-static inline void prefetch(void *x)
+
+static inline void prefetch(const void *x)
 {
-	__asm__ __volatile__ ("pref @%0\n\t" : : "r" (x) : "memory");
+	__builtin_prefetch(x, 0, 3);
 }
 
-#define prefetchw(x)	prefetch(x)
+static inline void prefetchw(const void *x)
+{
+	__builtin_prefetch(x, 1, 3);
+}
 #endif
 
 #endif /* __KERNEL__ */

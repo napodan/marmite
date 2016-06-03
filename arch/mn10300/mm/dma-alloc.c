@@ -15,6 +15,7 @@
 #include <linux/string.h>
 #include <linux/pci.h>
 #include <linux/gfp.h>
+#include <linux/export.h>
 #include <asm/io.h>
 
 static unsigned long pci_sram_allocated = 0xbc000000;
@@ -25,7 +26,8 @@ void *dma_alloc_coherent(struct device *dev, size_t size,
 	unsigned long addr;
 	void *ret;
 
-	printk("dma_alloc_coherent(%s,%zu,,%x)\n", dev_name(dev), size, gfp);
+	pr_debug("dma_alloc_coherent(%s,%zu,%x)\n",
+		 dev ? dev_name(dev) : "?", size, gfp);
 
 	if (0xbe000000 - pci_sram_allocated >= size) {
 		size = (size + 255) & ~255;

@@ -76,15 +76,16 @@ extern struct page *kmap_atomic_to_page(void *ptr);
 
 #ifndef __ASSEMBLY__
 
-#define __kmap_atomic_primary(type, paddr, ampr)						\
+#define __kmap_atomic_primary(cached, paddr, ampr)						\
 ({												\
 	unsigned long damlr, dampr;								\
 												\
 	dampr = paddr | xAMPRx_L | xAMPRx_M | xAMPRx_S | xAMPRx_SS_16Kb | xAMPRx_V;		\
 												\
-	if (type != __KM_CACHE)									\
+	if (!cached)										\
 		asm volatile("movgs %0,dampr"#ampr :: "r"(dampr) : "memory");			\
 	else											\
+		/* cache flush page attachment point */						\
 		asm volatile("movgs %0,iampr"#ampr"\n"						\
 			     "movgs %0,dampr"#ampr"\n"						\
 			     :: "r"(dampr) : "memory"						\
@@ -112,38 +113,20 @@ extern struct page *kmap_atomic_to_page(void *ptr);
 	(void *) damlr;										  \
 })
 
-static inline void *kmap_atomic(struct page *page, enum km_type type)
+static inline void *kmap_atomic_primary(struct page *page)
 {
 	unsigned long paddr;
 
 	pagefault_disable();
-	debug_kmap_atomic(type);
 	paddr = page_to_phys(page);
 
-	switch (type) {
-        case 0:		return __kmap_atomic_primary(0, paddr, 2);
-        case 1:		return __kmap_atomic_primary(1, paddr, 3);
-        case 2:		return __kmap_atomic_primary(2, paddr, 4);
-        case 3:		return __kmap_atomic_primary(3, paddr, 5);
-        case 4:		return __kmap_atomic_primary(4, paddr, 6);
-        case 5:		return __kmap_atomic_primary(5, paddr, 7);
-        case 6:		return __kmap_atomic_primary(6, paddr, 8);
-        case 7:		return __kmap_atomic_primary(7, paddr, 9);
-        case 8:		return __kmap_atomic_primary(8, paddr, 10);
-
-	case 9 ... 9 + NR_TLB_LINES - 1:
-		return __kmap_atomic_secondary(type - 9, paddr);
-
-	default:
-		BUG();
-		return NULL;
-	}
+        return __kmap_atomic_primary(1, paddr, 2);
 }
 
-#define __kunmap_atomic_primary(type, ampr)				\
+#define __kunmap_atomic_primary(cached, ampr)				\
 do {									\
 	asm volatile("movgs gr0,dampr"#ampr"\n" ::: "memory");		\
-	if (type == __KM_CACHE)						\
+	if (cached)							\
 		asm volatile("movgs gr0,iampr"#ampr"\n" ::: "memory");	\
 } while(0)
 
@@ -152,28 +135,14 @@ do {									\
 	asm volatile("tlbpr %0,gr0,#4,#1" : : "r"(vaddr) : "memory");	\
 } while(0)
 
-static inline void kunmap_atomic(void *kvaddr, enum km_type type)
+static inline void kunmap_atomic_primary(void *kvaddr)
 {
-	switch (type) {
-        case 0:		__kunmap_atomic_primary(0, 2);	break;
-        case 1:		__kunmap_atomic_primary(1, 3);	break;
-        case 2:		__kunmap_atomic_primary(2, 4);	break;
-        case 3:		__kunmap_atomic_primary(3, 5);	break;
-        case 4:		__kunmap_atomic_primary(4, 6);	break;
-        case 5:		__kunmap_atomic_primary(5, 7);	break;
-        case 6:		__kunmap_atomic_primary(6, 8);	break;
-        case 7:		__kunmap_atomic_primary(7, 9);	break;
-        case 8:		__kunmap_atomic_primary(8, 10);	break;
-
-	case 9 ... 9 + NR_TLB_LINES - 1:
-		__kunmap_atomic_secondary(type - 9, kvaddr);
-		break;
-
-	default:
-		BUG();
-	}
+        __kunmap_atomic_primary(1, 2);
 	pagefault_enable();
 }
+
+void *kmap_atomic(struct page *page);
+void __kunmap_atomic(void *kvaddr);
 
 #endif /* !__ASSEMBLY__ */
 

@@ -57,14 +57,20 @@ static void copy_boot_params(void)
 }
 
 /*
- * Set the keyboard repeat rate to maximum.  Unclear why this
+ * Query the keyboard lock status as given by the BIOS, and
+ * set the keyboard repeat rate to maximum.  Unclear why the latter
  * is done here; this might be possible to kill off as stale code.
  */
-static void keyboard_set_repeat(void)
+static void keyboard_init(void)
 {
-	struct biosregs ireg;
+	struct biosregs ireg, oreg;
 	initregs(&ireg);
-	ireg.ax = 0x0305;
+
+	ireg.ah = 0x02;		/* Get keyboard status */
+	intcall(0x16, &ireg, &oreg);
+	boot_params.kbd_status = oreg.al;
+
+	ireg.ax = 0x0305;	/* Set keyboard repeat rate */
 	intcall(0x16, &ireg, NULL);
 }
 
@@ -130,6 +136,11 @@ void main(void)
 	/* First, copy the boot header into the "zeropage" */
 	copy_boot_params();
 
+	/* Initialize the early-boot console */
+	console_init();
+	if (cmdline_find_option_bool("debug"))
+		puts("early console in setup code\n");
+
 	/* End of heap check */
 	init_heap();
 
@@ -146,8 +157,8 @@ void main(void)
 	/* Detect memory layout */
 	detect_memory();
 
-	/* Set keyboard repeat rate (why?) */
-	keyboard_set_repeat();
+	/* Set keyboard repeat rate (why?) and query the lock flags */
+	keyboard_init();
 
 	/* Query MCA information */
 	query_mca();
@@ -167,10 +178,6 @@ void main(void)
 
 	/* Set the video mode */
 	set_video();
-
-	/* Parse command line for 'quiet' and pass it to decompressor. */
-	if (cmdline_find_option_bool("quiet"))
-		boot_params.hdr.loadflags |= QUIET_FLAG;
 
 	/* Do the last things and invoke protected mode */
 	go_to_protected_mode();

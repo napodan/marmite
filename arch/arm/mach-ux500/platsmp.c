@@ -18,39 +18,49 @@
 #include <linux/io.h>
 
 #include <asm/cacheflush.h>
-#include <asm/localtimer.h>
+#include <asm/smp_plat.h>
 #include <asm/smp_scu.h>
-#include <mach/hardware.h>
+
+#include "setup.h"
+
+#include "db8500-regs.h"
+#include "id.h"
+
+/* This is called from headsmp.S to wakeup the secondary core */
+extern void u8500_secondary_startup(void);
 
 /*
- * control for which core is the next to come out of the secondary
- * boot "holding pen"
+ * Write pen_release in a way that is guaranteed to be visible to all
+ * observers, irrespective of whether they're taking part in coherency
+ * or not.  This is necessary for the hotplug code to work reliably.
  */
-volatile int __cpuinitdata pen_release = -1;
-
-static unsigned int __init get_core_count(void)
+static void write_pen_release(int val)
 {
-	return scu_get_core_count(__io_address(UX500_SCU_BASE));
+	pen_release = val;
+	smp_wmb();
+	__cpuc_flush_dcache_area((void *)&pen_release, sizeof(pen_release));
+	outer_clean_range(__pa(&pen_release), __pa(&pen_release + 1));
+}
+
+static void __iomem *scu_base_addr(void)
+{
+	if (cpu_is_u8500_family() || cpu_is_ux540_family())
+		return __io_address(U8500_SCU_BASE);
+	else
+		ux500_unknown_soc();
+
+	return NULL;
 }
 
 static DEFINE_SPINLOCK(boot_lock);
 
-void __cpuinit platform_secondary_init(unsigned int cpu)
+static void __cpuinit ux500_secondary_init(unsigned int cpu)
 {
-	trace_hardirqs_off();
-
-	/*
-	 * if any interrupts are already enabled for the primary
-	 * core (e.g. timer irq), then they will not have been enabled
-	 * for us: do so
-	 */
-	gic_cpu_init(0, __io_address(UX500_GIC_CPU_BASE));
-
 	/*
 	 * let the primary processor know we're out of the
 	 * pen, then head off into the C entry point
 	 */
-	pen_release = -1;
+	write_pen_release(-1);
 
 	/*
 	 * Synchronise with the boot thread.
@@ -59,7 +69,7 @@ void __cpuinit platform_secondary_init(unsigned int cpu)
 	spin_unlock(&boot_lock);
 }
 
-int __cpuinit boot_secondary(unsigned int cpu, struct task_struct *idle)
+static int __cpuinit ux500_boot_secondary(unsigned int cpu, struct task_struct *idle)
 {
 	unsigned long timeout;
 
@@ -74,9 +84,9 @@ int __cpuinit boot_secondary(unsigned int cpu, struct task_struct *idle)
 	 * the holding pen - release it, then wait for it to flag
 	 * that it has been released by resetting pen_release.
 	 */
-	pen_release = cpu;
-	__cpuc_flush_dcache_area((void *)&pen_release, sizeof(pen_release));
-	outer_clean_range(__pa(&pen_release), __pa(&pen_release) + 1);
+	write_pen_release(cpu_logical_map(cpu));
+
+	arch_send_wakeup_ipi_mask(cpumask_of(cpu));
 
 	timeout = jiffies + (1 * HZ);
 	while (time_before(jiffies, timeout)) {
@@ -95,8 +105,12 @@ int __cpuinit boot_secondary(unsigned int cpu, struct task_struct *idle)
 
 static void __init wakeup_secondary(void)
 {
-	/* nobody is to be released from the pen yet */
-	pen_release = -1;
+	void __iomem *backupram;
+
+	if (cpu_is_u8500_family() || cpu_is_ux540_family())
+		backupram = __io_address(U8500_BACKUPRAM0_BASE);
+	else
+		ux500_unknown_soc();
 
 	/*
 	 * write the address of secondary startup into the backup ram register
@@ -104,15 +118,13 @@ static void __init wakeup_secondary(void)
 	 * backup ram register at offset 0x1FF0, which is what boot rom code
 	 * is waiting for. This would wake up the secondary core from WFE
 	 */
-#define U8500_CPU1_JUMPADDR_OFFSET 0x1FF4
+#define UX500_CPU1_JUMPADDR_OFFSET 0x1FF4
 	__raw_writel(virt_to_phys(u8500_secondary_startup),
-		__io_address(UX500_BACKUPRAM0_BASE) +
-		U8500_CPU1_JUMPADDR_OFFSET);
+		     backupram + UX500_CPU1_JUMPADDR_OFFSET);
 
-#define U8500_CPU1_WAKEMAGIC_OFFSET 0x1FF0
+#define UX500_CPU1_WAKEMAGIC_OFFSET 0x1FF0
 	__raw_writel(0xA1FEED01,
-		__io_address(UX500_BACKUPRAM0_BASE) +
-		U8500_CPU1_WAKEMAGIC_OFFSET);
+		     backupram + UX500_CPU1_WAKEMAGIC_OFFSET);
 
 	/* make sure write buffer is drained */
 	mb();
@@ -122,57 +134,37 @@ static void __init wakeup_secondary(void)
  * Initialise the CPU possible map early - this describes the CPUs
  * which may be present or become present in the system.
  */
-void __init smp_init_cpus(void)
+static void __init ux500_smp_init_cpus(void)
 {
-	unsigned int i, ncores = get_core_count();
+	void __iomem *scu_base = scu_base_addr();
+	unsigned int i, ncores;
+
+	ncores = scu_base ? scu_get_core_count(scu_base) : 1;
+
+	/* sanity check */
+	if (ncores > nr_cpu_ids) {
+		pr_warn("SMP: %u cores greater than maximum (%u), clipping\n",
+			ncores, nr_cpu_ids);
+		ncores = nr_cpu_ids;
+	}
 
 	for (i = 0; i < ncores; i++)
 		set_cpu_possible(i, true);
 }
 
-void __init smp_prepare_cpus(unsigned int max_cpus)
+static void __init ux500_smp_prepare_cpus(unsigned int max_cpus)
 {
-	unsigned int ncores = get_core_count();
-	unsigned int cpu = smp_processor_id();
-	int i;
 
-	/* sanity check */
-	if (ncores == 0) {
-		printk(KERN_ERR
-		       "U8500: strange CM count of 0? Default to 1\n");
-		ncores = 1;
-	}
-
-	if (ncores > num_possible_cpus())	{
-		printk(KERN_WARNING
-		       "U8500: no. of cores (%d) greater than configured "
-		       "maximum of %d - clipping\n",
-		       ncores, num_possible_cpus());
-		ncores = num_possible_cpus();
-	}
-
-	smp_store_cpu_info(cpu);
-
-	/*
-	 * are we trying to boot more cores than exist?
-	 */
-	if (max_cpus > ncores)
-		max_cpus = ncores;
-
-	/*
-	 * Initialise the present map, which describes the set of CPUs
-	 * actually populated at the present time.
-	 */
-	for (i = 0; i < max_cpus; i++)
-		set_cpu_present(i, true);
-
-	if (max_cpus > 1) {
-		/*
-		 * Enable the local timer or broadcast device for the
-		 * boot CPU, but only if we have more than one CPU.
-		 */
-		percpu_timer_setup();
-		scu_enable(__io_address(UX500_SCU_BASE));
-		wakeup_secondary();
-	}
+	scu_enable(scu_base_addr());
+	wakeup_secondary();
 }
+
+struct smp_operations ux500_smp_ops __initdata = {
+	.smp_init_cpus		= ux500_smp_init_cpus,
+	.smp_prepare_cpus	= ux500_smp_prepare_cpus,
+	.smp_secondary_init	= ux500_secondary_init,
+	.smp_boot_secondary	= ux500_boot_secondary,
+#ifdef CONFIG_HOTPLUG_CPU
+	.cpu_die		= ux500_cpu_die,
+#endif
+};

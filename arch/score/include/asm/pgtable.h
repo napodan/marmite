@@ -88,10 +88,7 @@ static inline void pmd_clear(pmd_t *pmdp)
 
 #define pte_offset_map(dir, address)	\
 	((pte_t *)page_address(pmd_page(*(dir))) + __pte_offset(address))
-#define pte_offset_map_nested(dir, address)	\
-	((pte_t *)page_address(pmd_page(*(dir))) + __pte_offset(address))
 #define pte_unmap(pte) ((void)(pte))
-#define pte_unmap_nested(pte) ((void)(pte))
 
 /*
  * Bits 9(_PAGE_PRESENT) and 10(_PAGE_FILE)are taken,
@@ -115,9 +112,6 @@ static inline pte_t pte_mkspecial(pte_t pte) { return pte; }
 #define set_pte_at(mm, addr, ptep, pteval) set_pte(ptep, pteval)
 #define pte_clear(mm, addr, xp)		\
 	do { set_pte_at(mm, addr, xp, __pte(0)); } while (0)
-
-#define io_remap_pfn_range(vma, vaddr, pfn, size, prot)		\
-		remap_pfn_range(vma, vaddr, pfn, size, prot)
 
 /*
  * The "pgd_xxx()" functions here are trivial for a folded two-level

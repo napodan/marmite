@@ -6,7 +6,7 @@
  */
 
 #include <asm/romimage-macros.h>
-#include "partner-jet-setup.txt"
+#include <mach/partner-jet-setup.txt>
 
 	/* execute icbi after enabling cache */
 	mov.l	1f, r0
@@ -35,7 +35,7 @@
 #define HIZCRA		0xa4050158
 #define PGDR		0xa405012c
 
-extern inline void mmcif_update_progress(int nr)
+static inline void mmcif_update_progress(int nr)
 {
 	/* disable Hi-Z for LED pins */
 	__raw_writew(__raw_readw(HIZCRA) & ~(1 << 1), HIZCRA);

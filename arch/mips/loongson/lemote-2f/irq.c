@@ -2,9 +2,9 @@
  * Copyright (C) 2007 Lemote Inc.
  * Author: Fuxin Zhang, zhangfx@lemote.com
  *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
+ *  This program is free software; you can redistribute	 it and/or modify it
+ *  under  the terms of	 the GNU General  Public License as published by the
+ *  Free Software Foundation;  either version 2 of the	License, or (at your
  *  option) any later version.
  */
 
@@ -18,11 +18,10 @@
 #include <loongson.h>
 #include <machine.h>
 
-#define LOONGSON_TIMER_IRQ	(MIPS_CPU_IRQ_BASE + 7)	/* cpu timer */
-#define LOONGSON_PERFCNT_IRQ	(MIPS_CPU_IRQ_BASE + 6)	/* cpu perf counter */
-#define LOONGSON_NORTH_BRIDGE_IRQ	(MIPS_CPU_IRQ_BASE + 6)	/* bonito */
-#define LOONGSON_UART_IRQ	(MIPS_CPU_IRQ_BASE + 3)	/* cpu serial port */
-#define LOONGSON_SOUTH_BRIDGE_IRQ	(MIPS_CPU_IRQ_BASE + 2)	/* i8259 */
+#define LOONGSON_TIMER_IRQ	(MIPS_CPU_IRQ_BASE + 7) /* cpu timer */
+#define LOONGSON_NORTH_BRIDGE_IRQ	(MIPS_CPU_IRQ_BASE + 6) /* bonito */
+#define LOONGSON_UART_IRQ	(MIPS_CPU_IRQ_BASE + 3) /* cpu serial port */
+#define LOONGSON_SOUTH_BRIDGE_IRQ	(MIPS_CPU_IRQ_BASE + 2) /* i8259 */
 
 #define LOONGSON_INT_BIT_INT0		(1 << 11)
 #define LOONGSON_INT_BIT_INT1		(1 << 12)
@@ -79,9 +78,7 @@ void mach_irq_dispatch(unsigned int pending)
 	if (pending & CAUSEF_IP7)
 		do_IRQ(LOONGSON_TIMER_IRQ);
 	else if (pending & CAUSEF_IP6) {	/* North Bridge, Perf counter */
-#if defined(CONFIG_OPROFILE) || defined(CONFIG_OPROFILE_MODULE)
-		do_IRQ(LOONGSON2_PERFCNT_IRQ);
-#endif
+		do_perfcnt_IRQ();
 		bonito_irqdispatch();
 	} else if (pending & CAUSEF_IP3)	/* CPU UART */
 		do_IRQ(LOONGSON_UART_IRQ);
@@ -89,13 +86,6 @@ void mach_irq_dispatch(unsigned int pending)
 		i8259_irqdispatch();
 	else
 		spurious_interrupt();
-}
-
-void __init set_irq_trigger_mode(void)
-{
-	/* setup cs5536 as high level trigger */
-	LOONGSON_INTPOL = LOONGSON_INT_BIT_INT0 | LOONGSON_INT_BIT_INT1;
-	LOONGSON_INTEDGE &= ~(LOONGSON_INT_BIT_INT0 | LOONGSON_INT_BIT_INT1);
 }
 
 static irqreturn_t ip6_action(int cpl, void *dev_id)
@@ -106,21 +96,26 @@ static irqreturn_t ip6_action(int cpl, void *dev_id)
 struct irqaction ip6_irqaction = {
 	.handler = ip6_action,
 	.name = "cascade",
-	.flags = IRQF_SHARED,
+	.flags = IRQF_SHARED | IRQF_NO_THREAD,
 };
 
 struct irqaction cascade_irqaction = {
 	.handler = no_action,
 	.name = "cascade",
+	.flags = IRQF_NO_THREAD,
 };
 
 void __init mach_init_irq(void)
 {
 	/* init all controller
-	 *   0-15         ------> i8259 interrupt
-	 *   16-23        ------> mips cpu interrupt
-	 *   32-63        ------> bonito irq
+	 *   0-15	  ------> i8259 interrupt
+	 *   16-23	  ------> mips cpu interrupt
+	 *   32-63	  ------> bonito irq
 	 */
+
+	/* setup cs5536 as high level trigger */
+	LOONGSON_INTPOL = LOONGSON_INT_BIT_INT0 | LOONGSON_INT_BIT_INT1;
+	LOONGSON_INTEDGE &= ~(LOONGSON_INT_BIT_INT0 | LOONGSON_INT_BIT_INT1);
 
 	/* Sets the first-level interrupt dispatcher. */
 	mips_cpu_irq_init();

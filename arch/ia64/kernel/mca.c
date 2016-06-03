@@ -92,7 +92,6 @@
 #include <asm/meminit.h>
 #include <asm/page.h>
 #include <asm/ptrace.h>
-#include <asm/system.h>
 #include <asm/sal.h>
 #include <asm/mca.h>
 #include <asm/kexec.h>
@@ -581,6 +580,8 @@ ia64_mca_cpe_int_handler (int cpe_irq, void *arg)
 out:
 	/* Get the CPE error record and log it */
 	ia64_mca_log_sal_error_record(SAL_INFO_TYPE_CPE);
+
+	local_irq_disable();
 
 	return IRQ_HANDLED;
 }
@@ -1445,6 +1446,8 @@ out:
 	/* Get the CMC error record and log it */
 	ia64_mca_log_sal_error_record(SAL_INFO_TYPE_CMC);
 
+	local_irq_disable();
+
 	return IRQ_HANDLED;
 }
 
@@ -1511,7 +1514,8 @@ static void
 ia64_mca_cmc_poll (unsigned long dummy)
 {
 	/* Trigger a CMC interrupt cascade  */
-	platform_send_ipi(first_cpu(cpu_online_map), IA64_CMCP_VECTOR, IA64_IPI_DM_INT, 0);
+	platform_send_ipi(cpumask_first(cpu_online_mask), IA64_CMCP_VECTOR,
+							IA64_IPI_DM_INT, 0);
 }
 
 /*
@@ -1587,7 +1591,8 @@ static void
 ia64_mca_cpe_poll (unsigned long dummy)
 {
 	/* Trigger a CPE interrupt cascade  */
-	platform_send_ipi(first_cpu(cpu_online_map), IA64_CPEP_VECTOR, IA64_IPI_DM_INT, 0);
+	platform_send_ipi(cpumask_first(cpu_online_mask), IA64_CPEP_VECTOR,
+							IA64_IPI_DM_INT, 0);
 }
 
 #endif /* CONFIG_ACPI */
@@ -2056,6 +2061,29 @@ ia64_mca_init(void)
 
 	IA64_MCA_DEBUG("%s: registered OS INIT handler with SAL\n", __func__);
 
+	/* Initialize the areas set aside by the OS to buffer the
+	 * platform/processor error states for MCA/INIT/CMC
+	 * handling.
+	 */
+	ia64_log_init(SAL_INFO_TYPE_MCA);
+	ia64_log_init(SAL_INFO_TYPE_INIT);
+	ia64_log_init(SAL_INFO_TYPE_CMC);
+	ia64_log_init(SAL_INFO_TYPE_CPE);
+
+	mca_init = 1;
+	printk(KERN_INFO "MCA related initialization done\n");
+}
+
+
+/*
+ * These pieces cannot be done in ia64_mca_init() because it is called before
+ * early_irq_init() which would wipe out our percpu irq registrations. But we
+ * cannot leave them until ia64_mca_late_init() because by then all the other
+ * processors have been brought online and have set their own CMC vectors to
+ * point at a non-existant action. Called from arch_early_irq_init().
+ */
+void __init ia64_mca_irq_init(void)
+{
 	/*
 	 *  Configure the CMCI/P vector and handler. Interrupts for CMC are
 	 *  per-processor, so AP CMC interrupts are setup in smp_callin() (smpboot.c).
@@ -2074,18 +2102,6 @@ ia64_mca_init(void)
 	/* Setup the CPEI/P handler */
 	register_percpu_irq(IA64_CPEP_VECTOR, &mca_cpep_irqaction);
 #endif
-
-	/* Initialize the areas set aside by the OS to buffer the
-	 * platform/processor error states for MCA/INIT/CMC
-	 * handling.
-	 */
-	ia64_log_init(SAL_INFO_TYPE_MCA);
-	ia64_log_init(SAL_INFO_TYPE_INIT);
-	ia64_log_init(SAL_INFO_TYPE_CMC);
-	ia64_log_init(SAL_INFO_TYPE_CPE);
-
-	mca_init = 1;
-	printk(KERN_INFO "MCA related initialization done\n");
 }
 
 /*
@@ -2123,7 +2139,6 @@ ia64_mca_late_init(void)
 	cpe_poll_timer.function = ia64_mca_cpe_poll;
 
 	{
-		struct irq_desc *desc;
 		unsigned int irq;
 
 		if (cpe_vector >= 0) {
@@ -2131,8 +2146,7 @@ ia64_mca_late_init(void)
 			irq = local_vector_to_irq(cpe_vector);
 			if (irq > 0) {
 				cpe_poll_enabled = 0;
-				desc = irq_desc + irq;
-				desc->status |= IRQ_PER_CPU;
+				irq_set_status_flags(irq, IRQ_PER_CPU);
 				setup_irq(irq, &mca_cpe_irqaction);
 				ia64_cpe_irq = irq;
 				ia64_mca_register_cpev(cpe_vector);

@@ -1,6 +1,7 @@
 #ifndef _ASM_X86_IRQ_VECTORS_H
 #define _ASM_X86_IRQ_VECTORS_H
 
+#include <linux/threads.h>
 /*
  * Linux IRQ vector layout.
  *
@@ -16,8 +17,8 @@
  *  Vectors   0 ...  31 : system traps and exceptions - hardcoded events
  *  Vectors  32 ... 127 : device interrupts
  *  Vector  128         : legacy int80 syscall interface
- *  Vectors 129 ... 237 : device interrupts
- *  Vectors 238 ... 255 : special interrupts
+ *  Vectors 129 ... INVALIDATE_TLB_VECTOR_START-1 except 204 : device interrupts
+ *  Vectors INVALIDATE_TLB_VECTOR_START ... 255 : special interrupts
  *
  * 64-bit x86 has per CPU IDT tables, 32-bit has one shared IDT table.
  *
@@ -96,10 +97,25 @@
 #define THRESHOLD_APIC_VECTOR		0xf9
 #define REBOOT_VECTOR			0xf8
 
-/* f0-f7 used for spreading out TLB flushes: */
-#define INVALIDATE_TLB_VECTOR_END	0xf7
-#define INVALIDATE_TLB_VECTOR_START	0xf0
-#define NUM_INVALIDATE_TLB_VECTORS	   8
+/*
+ * Generic system vector for platform specific use
+ */
+#define X86_PLATFORM_IPI_VECTOR		0xf7
+
+/* Vector for KVM to deliver posted interrupt IPI */
+#ifdef CONFIG_HAVE_KVM
+#define POSTED_INTR_VECTOR		0xf2
+#endif
+
+/*
+ * IRQ work vector:
+ */
+#define IRQ_WORK_VECTOR			0xf6
+
+#define UV_BAU_MESSAGE			0xf5
+
+/* Vector on which hypervisor callbacks will be delivered */
+#define HYPERVISOR_CALLBACK_VECTOR	0xf3
 
 /*
  * Local APIC timer IRQ vector is on a different priority level,
@@ -107,23 +123,6 @@
  * sources per level' errata.
  */
 #define LOCAL_TIMER_VECTOR		0xef
-
-/*
- * Generic system vector for platform specific use
- */
-#define X86_PLATFORM_IPI_VECTOR		0xed
-
-/*
- * Performance monitoring pending work vector:
- */
-#define LOCAL_PENDING_VECTOR		0xec
-
-#define UV_BAU_MESSAGE			0xea
-
-/*
- * Self IPI vector for machine checks
- */
-#define MCE_SELF_VECTOR			0xeb
 
 #define NR_VECTORS			 256
 
@@ -155,19 +154,11 @@ static inline int invalid_vm86_irq(int irq)
 #define IO_APIC_VECTOR_LIMIT		( 32 * MAX_IO_APICS )
 
 #ifdef CONFIG_X86_IO_APIC
-# ifdef CONFIG_SPARSE_IRQ
-#  define CPU_VECTOR_LIMIT		(64 * NR_CPUS)
-#  define NR_IRQS					\
+# define CPU_VECTOR_LIMIT		(64 * NR_CPUS)
+# define NR_IRQS					\
 	(CPU_VECTOR_LIMIT > IO_APIC_VECTOR_LIMIT ?	\
 		(NR_VECTORS + CPU_VECTOR_LIMIT)  :	\
 		(NR_VECTORS + IO_APIC_VECTOR_LIMIT))
-# else
-#  define CPU_VECTOR_LIMIT		(32 * NR_CPUS)
-#  define NR_IRQS					\
-	(CPU_VECTOR_LIMIT < IO_APIC_VECTOR_LIMIT ?	\
-		(NR_VECTORS + CPU_VECTOR_LIMIT)  :	\
-		(NR_VECTORS + IO_APIC_VECTOR_LIMIT))
-# endif
 #else /* !CONFIG_X86_IO_APIC: */
 # define NR_IRQS			NR_IRQS_LEGACY
 #endif

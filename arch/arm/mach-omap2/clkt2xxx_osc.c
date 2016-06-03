@@ -23,14 +23,19 @@
 #include <linux/clk.h>
 #include <linux/io.h>
 
-#include <plat/clock.h>
-
 #include "clock.h"
 #include "clock2xxx.h"
-#include "prm.h"
+#include "prm2xxx_3xxx.h"
 #include "prm-regbits-24xx.h"
 
-static int omap2_enable_osc_ck(struct clk *clk)
+/*
+ * XXX This does not actually enable the osc_ck, since the osc_ck must
+ * be running for this function to be called.  Instead, this function
+ * is used to disable an autoidle mode on the osc_ck.  The existing
+ * clk_enable/clk_disable()-based usecounting for osc_ck should be
+ * replaced with autoidle-based usecounting.
+ */
+int omap2_enable_osc_ck(struct clk_hw *clk)
 {
 	u32 pcc;
 
@@ -41,7 +46,14 @@ static int omap2_enable_osc_ck(struct clk *clk)
 	return 0;
 }
 
-static void omap2_disable_osc_ck(struct clk *clk)
+/*
+ * XXX This does not actually disable the osc_ck, since doing so would
+ * immediately halt the system.  Instead, this function is used to
+ * enable an autoidle mode on the osc_ck.  The existing
+ * clk_enable/clk_disable()-based usecounting for osc_ck should be
+ * replaced with autoidle-based usecounting.
+ */
+void omap2_disable_osc_ck(struct clk_hw *clk)
 {
 	u32 pcc;
 
@@ -50,13 +62,8 @@ static void omap2_disable_osc_ck(struct clk *clk)
 	__raw_writel(pcc | OMAP_AUTOEXTCLKMODE_MASK, prcm_clksrc_ctrl);
 }
 
-const struct clkops clkops_oscck = {
-	.enable		= omap2_enable_osc_ck,
-	.disable	= omap2_disable_osc_ck,
-};
-
-unsigned long omap2_osc_clk_recalc(struct clk *clk)
+unsigned long omap2_osc_clk_recalc(struct clk_hw *clk,
+				   unsigned long parent_rate)
 {
 	return omap2xxx_get_apll_clkin() * omap2xxx_get_sysclkdiv();
 }
-

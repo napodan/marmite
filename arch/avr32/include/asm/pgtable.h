@@ -319,9 +319,7 @@ static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
 #define pte_offset_kernel(dir, address)					\
 	((pte_t *) pmd_page_vaddr(*(dir)) + pte_index(address))
 #define pte_offset_map(dir, address) pte_offset_kernel(dir, address)
-#define pte_offset_map_nested(dir, address) pte_offset_kernel(dir, address)
 #define pte_unmap(pte)		do { } while (0)
-#define pte_unmap_nested(pte)	do { } while (0)
 
 struct vm_area_struct;
 extern void update_mmu_cache(struct vm_area_struct * vma,
@@ -363,9 +361,6 @@ extern void update_mmu_cache(struct vm_area_struct * vma,
 typedef pte_t *pte_addr_t;
 
 #define kern_addr_valid(addr)	(1)
-
-#define io_remap_pfn_range(vma, vaddr, pfn, size, prot)	\
-	remap_pfn_range(vma, vaddr, pfn, size, prot)
 
 /* No page table caches to initialize (?) */
 #define pgtable_cache_init()	do { } while(0)

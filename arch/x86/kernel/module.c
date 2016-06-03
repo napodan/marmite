@@ -15,57 +15,53 @@
     along with this program; if not, write to the Free Software
     Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 */
+
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/moduleloader.h>
 #include <linux/elf.h>
 #include <linux/vmalloc.h>
 #include <linux/fs.h>
 #include <linux/string.h>
 #include <linux/kernel.h>
+#include <linux/kasan.h>
 #include <linux/bug.h>
 #include <linux/mm.h>
 #include <linux/gfp.h>
+#include <linux/jump_label.h>
 
-#include <asm/system.h>
 #include <asm/page.h>
 #include <asm/pgtable.h>
 
 #if 0
-#define DEBUGP printk
+#define DEBUGP(fmt, ...)				\
+	printk(KERN_DEBUG fmt, ##__VA_ARGS__)
 #else
-#define DEBUGP(fmt...)
+#define DEBUGP(fmt, ...)				\
+do {							\
+	if (0)						\
+		printk(KERN_DEBUG fmt, ##__VA_ARGS__);	\
+} while (0)
 #endif
 
 void *module_alloc(unsigned long size)
 {
-	struct vm_struct *area;
+	void *p;
 
-	if (!size)
-		return NULL;
-	size = PAGE_ALIGN(size);
-	if (size > MODULES_LEN)
+	if (PAGE_ALIGN(size) > MODULES_LEN)
 		return NULL;
 
-	area = __get_vm_area(size, VM_ALLOC, MODULES_VADDR, MODULES_END);
-	if (!area)
+	p = __vmalloc_node_range(size, MODULE_ALIGN,
+				    MODULES_VADDR + get_module_load_offset(),
+				    MODULES_END, GFP_KERNEL | __GFP_HIGHMEM,
+				    PAGE_KERNEL_EXEC, 0, NUMA_NO_NODE,
+				    __builtin_return_address(0));
+	if (p && (kasan_module_alloc(p, size) < 0)) {
+		vfree(p);
 		return NULL;
+	}
 
-	return __vmalloc_area(area, GFP_KERNEL | __GFP_HIGHMEM,
-					PAGE_KERNEL_EXEC);
-}
-
-/* Free memory returned from module_alloc */
-void module_free(struct module *mod, void *module_region)
-{
-	vfree(module_region);
-}
-
-/* We don't need anything special. */
-int module_frob_arch_sections(Elf_Ehdr *hdr,
-			      Elf_Shdr *sechdrs,
-			      char *secstrings,
-			      struct module *mod)
-{
-	return 0;
+	return p;
 }
 
 #ifdef CONFIG_X86_32
@@ -80,8 +76,8 @@ int apply_relocate(Elf32_Shdr *sechdrs,
 	Elf32_Sym *sym;
 	uint32_t *location;
 
-	DEBUGP("Applying relocate section %u to %u\n", relsec,
-	       sechdrs[relsec].sh_info);
+	DEBUGP("Applying relocate section %u to %u\n",
+	       relsec, sechdrs[relsec].sh_info);
 	for (i = 0; i < sechdrs[relsec].sh_size / sizeof(*rel); i++) {
 		/* This is where to make the change */
 		location = (void *)sechdrs[sechdrs[relsec].sh_info].sh_addr
@@ -97,27 +93,16 @@ int apply_relocate(Elf32_Shdr *sechdrs,
 			*location += sym->st_value;
 			break;
 		case R_386_PC32:
-			/* Add the value, subtract its postition */
+			/* Add the value, subtract its position */
 			*location += sym->st_value - (uint32_t)location;
 			break;
 		default:
-			printk(KERN_ERR "module %s: Unknown relocation: %u\n",
+			pr_err("%s: Unknown relocation: %u\n",
 			       me->name, ELF32_R_TYPE(rel[i].r_info));
 			return -ENOEXEC;
 		}
 	}
 	return 0;
-}
-
-int apply_relocate_add(Elf32_Shdr *sechdrs,
-		       const char *strtab,
-		       unsigned int symindex,
-		       unsigned int relsec,
-		       struct module *me)
-{
-	printk(KERN_ERR "module %s: ADD RELOCATION unsupported\n",
-	       me->name);
-	return -ENOEXEC;
 }
 #else /*X86_64*/
 int apply_relocate_add(Elf64_Shdr *sechdrs,
@@ -132,8 +117,8 @@ int apply_relocate_add(Elf64_Shdr *sechdrs,
 	void *loc;
 	u64 val;
 
-	DEBUGP("Applying relocate section %u to %u\n", relsec,
-	       sechdrs[relsec].sh_info);
+	DEBUGP("Applying relocate section %u to %u\n",
+	       relsec, sechdrs[relsec].sh_info);
 	for (i = 0; i < sechdrs[relsec].sh_size / sizeof(*rel); i++) {
 		/* This is where to make the change */
 		loc = (void *)sechdrs[sechdrs[relsec].sh_info].sh_addr
@@ -145,8 +130,8 @@ int apply_relocate_add(Elf64_Shdr *sechdrs,
 			+ ELF64_R_SYM(rel[i].r_info);
 
 		DEBUGP("type %d st_value %Lx r_addend %Lx loc %Lx\n",
-			(int)ELF64_R_TYPE(rel[i].r_info),
-			sym->st_value, rel[i].r_addend, (u64)loc);
+		       (int)ELF64_R_TYPE(rel[i].r_info),
+		       sym->st_value, rel[i].r_addend, (u64)loc);
 
 		val = sym->st_value + rel[i].r_addend;
 
@@ -175,7 +160,7 @@ int apply_relocate_add(Elf64_Shdr *sechdrs,
 #endif
 			break;
 		default:
-			printk(KERN_ERR "module %s: Unknown rela relocation: %llu\n",
+			pr_err("%s: Unknown rela relocation: %llu\n",
 			       me->name, ELF64_R_TYPE(rel[i].r_info));
 			return -ENOEXEC;
 		}
@@ -183,23 +168,12 @@ int apply_relocate_add(Elf64_Shdr *sechdrs,
 	return 0;
 
 overflow:
-	printk(KERN_ERR "overflow in relocation type %d val %Lx\n",
+	pr_err("overflow in relocation type %d val %Lx\n",
 	       (int)ELF64_R_TYPE(rel[i].r_info), val);
-	printk(KERN_ERR "`%s' likely not compiled with -mcmodel=kernel\n",
+	pr_err("`%s' likely not compiled with -mcmodel=kernel\n",
 	       me->name);
 	return -ENOEXEC;
 }
-
-int apply_relocate(Elf_Shdr *sechdrs,
-		   const char *strtab,
-		   unsigned int symindex,
-		   unsigned int relsec,
-		   struct module *me)
-{
-	printk(KERN_ERR "non add relocation not supported\n");
-	return -ENOSYS;
-}
-
 #endif
 
 int module_finalize(const Elf_Ehdr *hdr,
@@ -239,11 +213,13 @@ int module_finalize(const Elf_Ehdr *hdr,
 		apply_paravirt(pseg, pseg + para->sh_size);
 	}
 
-	return module_bug_finalize(hdr, sechdrs, me);
+	/* make jump label nops */
+	jump_label_apply_nops(me);
+
+	return 0;
 }
 
 void module_arch_cleanup(struct module *mod)
 {
 	alternatives_smp_module_del(mod);
-	module_bug_cleanup(mod);
 }

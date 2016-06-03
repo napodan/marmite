@@ -22,9 +22,9 @@
 
 #undef DEBUG
 
-#include <linux/module.h>
 #include <linux/errno.h>
 #include <linux/sched.h>
+#include <linux/sched/rt.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/slab.h>
@@ -141,7 +141,7 @@ void __spu_update_sched_info(struct spu_context *ctx)
 	 * runqueue. The context will be rescheduled on the proper node
 	 * if it is timesliced or preempted.
 	 */
-	ctx->cpus_allowed = current->cpus_allowed;
+	cpumask_copy(&ctx->cpus_allowed, tsk_cpus_allowed(current));
 
 	/* Save the current cpu id for spu interrupt routing. */
 	ctx->last_ran = raw_smp_processor_id();
@@ -846,7 +846,7 @@ static struct spu_context *grab_runnable_context(int prio, int node)
 		struct list_head *rq = &spu_prio->runq[best];
 
 		list_for_each_entry(ctx, rq, rq) {
-			/* XXX(hch): check for affinity here aswell */
+			/* XXX(hch): check for affinity here as well */
 			if (__node_allowed(ctx, node)) {
 				__spu_del_from_rq(ctx);
 				goto found;
@@ -1095,7 +1095,7 @@ static int show_spu_loadavg(struct seq_file *s, void *private)
 		LOAD_INT(c), LOAD_FRAC(c),
 		count_active_contexts(),
 		atomic_read(&nr_spu_contexts),
-		current->nsproxy->pid_ns->last_pid);
+		task_active_pid_ns(current)->last_pid);
 	return 0;
 }
 

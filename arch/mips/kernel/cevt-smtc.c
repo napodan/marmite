@@ -11,6 +11,7 @@
 #include <linux/interrupt.h>
 #include <linux/percpu.h>
 #include <linux/smp.h>
+#include <linux/irq.h>
 
 #include <asm/smtc_ipi.h>
 #include <asm/time.h>
@@ -48,7 +49,7 @@ static int smtc_nextinvpe[NR_CPUS];
 
 /*
  * Timestamps stored are absolute values to be programmed
- * into Count register.  Valid timestamps will never be zero.
+ * into Count register.	 Valid timestamps will never be zero.
  * If a Zero Count value is actually calculated, it is converted
  * to be a 1, which will introduce 1 or two CPU cycles of error
  * roughly once every four billion events, which at 1000 HZ means

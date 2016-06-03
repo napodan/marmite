@@ -16,15 +16,6 @@
 #include <mach/hardware.h>
 
 /*
- * Static Chip Selects
- */
-
-#define PXA300_CS0_PHYS		(0x00000000)	/* PXA300/PXA310 _only_ */
-#define PXA300_CS1_PHYS		(0x30000000)	/* PXA300/PXA310 _only_ */
-#define PXA3xx_CS2_PHYS		(0x10000000)
-#define PXA3xx_CS3_PHYS		(0x14000000)
-
-/*
  * Oscillator Configuration Register (OSCC)
  */
 #define OSCC           __REG(0x41350000)  /* Oscillator Configuration Register */
@@ -47,7 +38,7 @@
 #define PCMD(x)		__REG(0x40F50110 + ((x) << 2))
 
 /*
- * Slave Power Managment Unit
+ * Slave Power Management Unit
  */
 #define ASCR		__REG(0x40f40000)	/* Application Subsystem Power Status/Configuration */
 #define ARSR		__REG(0x40f40004)	/* Application Subsystem Reset Status */
@@ -140,6 +131,7 @@
 #define AICSR		__REG(0x41340008)	/* Application Subsystem Interrupt Control/Status Register */
 #define CKENA		__REG(0x4134000C)	/* A Clock Enable Register */
 #define CKENB		__REG(0x41340010)	/* B Clock Enable Register */
+#define CKENC		__REG(0x41340024)	/* C Clock Enable Register */
 #define AC97_DIV	__REG(0x41340014)	/* AC97 clock divisor value register */
 
 #define ACCR_XPDIS		(1 << 31)	/* Core PLL Output Disable */

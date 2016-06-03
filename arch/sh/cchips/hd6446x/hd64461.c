@@ -17,8 +17,9 @@
 /* This belongs in cpu specific */
 #define INTC_ICR1 0xA4140010UL
 
-static void hd64461_mask_irq(unsigned int irq)
+static void hd64461_mask_irq(struct irq_data *data)
 {
+	unsigned int irq = data->irq;
 	unsigned short nimr;
 	unsigned short mask = 1 << (irq - HD64461_IRQBASE);
 
@@ -27,8 +28,9 @@ static void hd64461_mask_irq(unsigned int irq)
 	__raw_writew(nimr, HD64461_NIMR);
 }
 
-static void hd64461_unmask_irq(unsigned int irq)
+static void hd64461_unmask_irq(struct irq_data *data)
 {
+	unsigned int irq = data->irq;
 	unsigned short nimr;
 	unsigned short mask = 1 << (irq - HD64461_IRQBASE);
 
@@ -37,20 +39,21 @@ static void hd64461_unmask_irq(unsigned int irq)
 	__raw_writew(nimr, HD64461_NIMR);
 }
 
-static void hd64461_mask_and_ack_irq(unsigned int irq)
+static void hd64461_mask_and_ack_irq(struct irq_data *data)
 {
-	hd64461_mask_irq(irq);
+	hd64461_mask_irq(data);
+
 #ifdef CONFIG_HD64461_ENABLER
-	if (irq == HD64461_IRQBASE + 13)
+	if (data->irq == HD64461_IRQBASE + 13)
 		__raw_writeb(0x00, HD64461_PCC1CSCR);
 #endif
 }
 
 static struct irq_chip hd64461_irq_chip = {
 	.name		= "HD64461-IRQ",
-	.mask		= hd64461_mask_irq,
-	.mask_ack	= hd64461_mask_and_ack_irq,
-	.unmask		= hd64461_unmask_irq,
+	.irq_mask	= hd64461_mask_irq,
+	.irq_mask_ack	= hd64461_mask_and_ack_irq,
+	.irq_unmask	= hd64461_unmask_irq,
 };
 
 static void hd64461_irq_demux(unsigned int irq, struct irq_desc *desc)
@@ -70,10 +73,7 @@ static void hd64461_irq_demux(unsigned int irq, struct irq_desc *desc)
 
 int __init setup_hd64461(void)
 {
-	int i, nid = cpu_to_node(boot_cpu_data);
-
-	if (!MACH_HD64461)
-		return 0;
+	int irq_base, i;
 
 	printk(KERN_INFO
 	       "HD64461 configured at 0x%x on irq %d(mapped into %d to %d)\n",
@@ -86,30 +86,18 @@ int __init setup_hd64461(void)
 #endif
 	__raw_writew(0xffff, HD64461_NIMR);
 
-	/*  IRQ 80 -> 95 belongs to HD64461  */
-	for (i = HD64461_IRQBASE; i < HD64461_IRQBASE + 16; i++) {
-		unsigned int irq;
-
-		irq = create_irq_nr(i, nid);
-		if (unlikely(irq == 0)) {
-			pr_err("%s: failed hooking irq %d for HD64461\n",
-			       __func__, i);
-			return -EBUSY;
-		}
-
-		if (unlikely(irq != i)) {
-			pr_err("%s: got irq %d but wanted %d, bailing.\n",
-			       __func__, irq, i);
-			destroy_irq(irq);
-			return -EINVAL;
-		}
-
-		set_irq_chip_and_handler(i, &hd64461_irq_chip,
-					 handle_level_irq);
+	irq_base = irq_alloc_descs(HD64461_IRQBASE, HD64461_IRQBASE, 16, -1);
+	if (IS_ERR_VALUE(irq_base)) {
+		pr_err("%s: failed hooking irqs for HD64461\n", __func__);
+		return irq_base;
 	}
 
-	set_irq_chained_handler(CONFIG_HD64461_IRQ, hd64461_irq_demux);
-	set_irq_type(CONFIG_HD64461_IRQ, IRQ_TYPE_LEVEL_LOW);
+	for (i = 0; i < 16; i++)
+		irq_set_chip_and_handler(irq_base + i, &hd64461_irq_chip,
+					 handle_level_irq);
+
+	irq_set_chained_handler(CONFIG_HD64461_IRQ, hd64461_irq_demux);
+	irq_set_irq_type(CONFIG_HD64461_IRQ, IRQ_TYPE_LEVEL_LOW);
 
 #ifdef CONFIG_HD64461_ENABLER
 	printk(KERN_INFO "HD64461: enabling PCMCIA devices\n");

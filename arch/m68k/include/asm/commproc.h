@@ -88,7 +88,7 @@ typedef struct cpm_buf_desc {
 
 
 /* rx bd status/control bits */
-#define BD_SC_EMPTY	((ushort)0x8000)	/* Recieve is empty */
+#define BD_SC_EMPTY	((ushort)0x8000)	/* Receive is empty */
 #define BD_SC_WRAP	((ushort)0x2000)	/* Last buffer descriptor in table */
 #define BD_SC_INTRPT	((ushort)0x1000)	/* Interrupt on change */
 #define BD_SC_LAST	((ushort)0x0800)	/* Last buffer in frame OR control char */
@@ -96,7 +96,7 @@ typedef struct cpm_buf_desc {
 #define BD_SC_FIRST	((ushort)0x0400)	/* 1st buffer in an HDLC frame */
 #define BD_SC_ADDR	((ushort)0x0400)	/* 1st byte is a multidrop address */
 
-#define BD_SC_CM	((ushort)0x0200)	/* Continous mode */
+#define BD_SC_CM	((ushort)0x0200)	/* Continuous mode */
 #define BD_SC_ID	((ushort)0x0100)	/* Received too many idles */
 
 #define BD_SC_AM	((ushort)0x0080)	/* Multidrop address match */
@@ -478,23 +478,6 @@ typedef struct scc_enet {
  */
 #define SICR_ENET_MASK	((uint)0x000000ff)
 #define SICR_ENET_CLKRT	((uint)0x0000003d)
-#endif
-
-#ifdef CONFIG_RPXLITE
-/* This ENET stuff is for the MPC850 with ethernet on SCC2.  Some of
- * this may be unique to the RPX-Lite configuration.
- * Note TENA is on Port B.
- */
-#define PA_ENET_RXD	((ushort)0x0004)
-#define PA_ENET_TXD	((ushort)0x0008)
-#define PA_ENET_TCLK	((ushort)0x0200)
-#define PA_ENET_RCLK	((ushort)0x0800)
-#define PB_ENET_TENA	((uint)0x00002000)
-#define PC_ENET_CLSN	((ushort)0x0040)
-#define PC_ENET_RENA	((ushort)0x0080)
-
-#define SICR_ENET_MASK	((uint)0x0000ff00)
-#define SICR_ENET_CLKRT	((uint)0x00003d00)
 #endif
 
 #ifdef CONFIG_BSEIP

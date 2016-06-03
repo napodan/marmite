@@ -2,7 +2,7 @@
  * sc-ip22.c: Indy cache management functions.
  *
  * Copyright (C) 1997, 2001 Ralf Baechle (ralf@gnu.org),
- * derived from r4xx0.c by David S. Miller (dm@engr.sgi.com).
+ * derived from r4xx0.c by David S. Miller (davem@davemloft.net).
  */
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -12,7 +12,6 @@
 #include <asm/bcache.h>
 #include <asm/page.h>
 #include <asm/pgtable.h>
-#include <asm/system.h>
 #include <asm/bootinfo.h>
 #include <asm/sgi/ip22.h>
 #include <asm/sgi/mc.h>
@@ -160,7 +159,7 @@ static inline int __init indy_sc_probe(void)
 }
 
 /* XXX Check with wje if the Indy caches can differenciate between
-   writeback + invalidate and just invalidate.  */
+   writeback + invalidate and just invalidate.	*/
 static struct bcache_ops indy_sc_ops = {
 	.bc_enable = indy_sc_enable,
 	.bc_disable = indy_sc_disable,

@@ -17,8 +17,6 @@
 
 #include <mach/hardware.h>
 
-#define IO_SPACE_LIMIT 0x0000ffff
-
 extern int (*ixp4xx_pci_read)(u32 addr, u32 cmd, u32* data);
 extern int ixp4xx_pci_write(u32 addr, u32 cmd, u32 data);
 
@@ -41,11 +39,7 @@ extern int ixp4xx_pci_write(u32 addr, u32 cmd, u32 data);
  *    but in some cases the performance hit is acceptable. In addition, you
  *    cannot mmap() PCI devices in this case.
  */
-#ifndef	CONFIG_IXP4XX_INDIRECT_PCI
-
-#define __mem_pci(a)		(a)
-
-#else
+#ifdef	CONFIG_IXP4XX_INDIRECT_PCI
 
 /*
  * In the case of using indirect PCI, we simply return the actual PCI
@@ -58,24 +52,6 @@ static inline int is_pci_memory(u32 addr)
 {
 	return (addr >= PCIBIOS_MIN_MEM) && (addr <= 0x4FFFFFFF);
 }
-
-static inline void __iomem * __indirect_ioremap(unsigned long addr, size_t size,
-						unsigned int mtype)
-{
-	if (!is_pci_memory(addr))
-		return __arm_ioremap(addr, size, mtype);
-
-	return (void __iomem *)addr;
-}
-
-static inline void __indirect_iounmap(void __iomem *addr)
-{
-	if (!is_pci_memory((__force u32)addr))
-		__iounmap(addr);
-}
-
-#define __arch_ioremap(a, s, f)		__indirect_ioremap(a, s, f)
-#define __arch_iounmap(a)		__indirect_iounmap(a)
 
 #define writeb(v, p)			__indirect_writeb(v, p)
 #define writew(v, p)			__indirect_writew(v, p)
@@ -353,7 +329,7 @@ static inline unsigned int ioread8(const void __iomem *addr)
 		return (unsigned int)inb(port & PIO_MASK);
 	else
 #ifndef CONFIG_IXP4XX_INDIRECT_PCI
-		return (unsigned int)__raw_readb(port);
+		return (unsigned int)__raw_readb(addr);
 #else
 		return (unsigned int)__indirect_readb(addr);
 #endif
@@ -381,7 +357,7 @@ static inline unsigned int ioread16(const void __iomem *addr)
 		return	(unsigned int)inw(port & PIO_MASK);
 	else
 #ifndef CONFIG_IXP4XX_INDIRECT_PCI
-		return le16_to_cpu(__raw_readw((u32)port));
+		return le16_to_cpu((__force __le16)__raw_readw(addr));
 #else
 		return (unsigned int)__indirect_readw(addr);
 #endif
@@ -440,7 +416,7 @@ static inline void iowrite8(u8 value, void __iomem *addr)
 		outb(value, port & PIO_MASK);
 	else
 #ifndef CONFIG_IXP4XX_INDIRECT_PCI
-		__raw_writeb(value, port);
+		__raw_writeb(value, addr);
 #else
 		__indirect_writeb(value, addr);
 #endif

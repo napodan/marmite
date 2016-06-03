@@ -11,7 +11,7 @@
  * DM644X-EVM board. It has:
  * 	DM6446M02 module with 256MB NAND, 256MB RAM, TLV320AIC32 AIC,
  * 	USB, Ethernet, SD/MMC, UART, THS8200, TVP7000 for video.
- * 	Additionaly realtime clock, IR remote control receiver,
+ * 	Additionally realtime clock, IR remote control receiver,
  * 	IR Blaster based on MSP430 (firmware although is different
  * 	from used in DM644X-EVM), internal ATA-6 3.5” HDD drive
  * 	with PATA interface, two muxed red-green leds.
@@ -30,18 +30,17 @@
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 
-#include <mach/dm644x.h>
 #include <mach/common.h>
-#include <mach/i2c.h>
+#include <linux/platform_data/i2c-davinci.h>
 #include <mach/serial.h>
 #include <mach/mux.h>
-#include <mach/nand.h>
-#include <mach/mmc.h>
-#include <mach/usb.h>
+#include <linux/platform_data/mtd-davinci.h>
+#include <linux/platform_data/mmc-davinci.h>
+#include <linux/platform_data/usb-davinci.h>
 
-#define NEUROS_OSD2_PHY_MASK		0x2
-#define NEUROS_OSD2_MDIO_FREQUENCY	2200000 /* PHY bus frequency */
+#include "davinci.h"
 
+#define NEUROS_OSD2_PHY_ID		"davinci_mdio-0:01"
 #define LXT971_PHY_ID			0x001378e2
 #define LXT971_PHY_MASK			0xfffffff0
 
@@ -89,7 +88,8 @@ static struct davinci_nand_pdata davinci_ntosd2_nandflash_data = {
 	.parts		= davinci_ntosd2_nandflash_partition,
 	.nr_parts	= ARRAY_SIZE(davinci_ntosd2_nandflash_partition),
 	.ecc_mode	= NAND_ECC_HW,
-	.options	= NAND_USE_FLASH_BBT,
+	.ecc_bits	= 1,
+	.bbt_options	= NAND_BBT_USE_FLASH,
 };
 
 static struct resource davinci_ntosd2_nandflash_resource[] = {
@@ -163,66 +163,21 @@ static void __init davinci_ntosd2_map_io(void)
 	dm644x_init();
 }
 
-/*
- I2C initialization
-*/
-static struct davinci_i2c_platform_data ntosd2_i2c_pdata = {
-	.bus_freq	= 20 /* kHz */,
-	.bus_delay	= 100 /* usec */,
-};
-
-static struct i2c_board_info __initdata ntosd2_i2c_info[] =  {
-};
-
-static	int ntosd2_init_i2c(void)
-{
-	int	status;
-
-	davinci_init_i2c(&ntosd2_i2c_pdata);
-	status = gpio_request(NTOSD2_MSP430_IRQ, ntosd2_i2c_info[0].type);
-	if (status == 0) {
-		status = gpio_direction_input(NTOSD2_MSP430_IRQ);
-		if (status == 0) {
-			status = gpio_to_irq(NTOSD2_MSP430_IRQ);
-			if (status > 0) {
-				ntosd2_i2c_info[0].irq = status;
-				i2c_register_board_info(1,
-					ntosd2_i2c_info,
-					ARRAY_SIZE(ntosd2_i2c_info));
-			}
-		}
-	}
-	return status;
-}
-
 static struct davinci_mmc_config davinci_ntosd2_mmc_config = {
 	.wires		= 4,
-	.version	= MMC_CTLR_VERSION_1
 };
 
+#define HAS_ATA		IS_ENABLED(CONFIG_BLK_DEV_PALMCHIP_BK3710)
 
-#if defined(CONFIG_BLK_DEV_PALMCHIP_BK3710) || \
-	defined(CONFIG_BLK_DEV_PALMCHIP_BK3710_MODULE)
-#define HAS_ATA 1
-#else
-#define HAS_ATA 0
-#endif
-
-#if defined(CONFIG_MTD_NAND_DAVINCI) || \
-	defined(CONFIG_MTD_NAND_DAVINCI_MODULE)
-#define HAS_NAND 1
-#else
-#define HAS_NAND 0
-#endif
+#define HAS_NAND	IS_ENABLED(CONFIG_MTD_NAND_DAVINCI)
 
 static __init void davinci_ntosd2_init(void)
 {
 	struct clk *aemif_clk;
 	struct davinci_soc_info *soc_info = &davinci_soc_info;
-	int	status;
 
 	aemif_clk = clk_get(NULL, "aemif");
-	clk_enable(aemif_clk);
+	clk_prepare_enable(aemif_clk);
 
 	if (HAS_ATA) {
 		if (HAS_NAND)
@@ -243,17 +198,10 @@ static __init void davinci_ntosd2_init(void)
 	platform_add_devices(davinci_ntosd2_devices,
 				ARRAY_SIZE(davinci_ntosd2_devices));
 
-	/* Initialize I2C interface specific for this board */
-	status = ntosd2_init_i2c();
-	if (status < 0)
-		pr_warning("davinci_ntosd2_init: msp430 irq setup failed:"
-						"	 %d\n", status);
-
 	davinci_serial_init(&uart_config);
 	dm644x_init_asp(&dm644x_ntosd2_snd_data);
 
-	soc_info->emac_pdata->phy_mask = NEUROS_OSD2_PHY_MASK;
-	soc_info->emac_pdata->mdio_max_freq = NEUROS_OSD2_MDIO_FREQUENCY;
+	soc_info->emac_pdata->phy_id = NEUROS_OSD2_PHY_ID;
 
 	davinci_setup_usb(1000, 8);
 	/*
@@ -275,11 +223,12 @@ static __init void davinci_ntosd2_init(void)
 
 MACHINE_START(NEUROS_OSD2, "Neuros OSD2")
 	/* Maintainer: Neuros Technologies <neuros@groups.google.com> */
-	.phys_io	= IO_PHYS,
-	.io_pg_offst	= (__IO_ADDRESS(IO_PHYS) >> 18) & 0xfffc,
-	.boot_params	= (DAVINCI_DDR_BASE + 0x100),
+	.atag_offset	= 0x100,
 	.map_io		 = davinci_ntosd2_map_io,
 	.init_irq	= davinci_irq_init,
-	.timer		= &davinci_timer,
+	.init_time	= davinci_timer_init,
 	.init_machine = davinci_ntosd2_init,
+	.init_late	= davinci_init_late,
+	.dma_zone_size	= SZ_128M,
+	.restart	= davinci_restart,
 MACHINE_END

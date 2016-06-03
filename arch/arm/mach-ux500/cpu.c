@@ -2,104 +2,160 @@
  * Copyright (C) ST-Ericsson SA 2010
  *
  * Author: Rabin Vincent <rabin.vincent@stericsson.com> for ST-Ericsson
+ * Author: Lee Jones <lee.jones@linaro.org> for ST-Ericsson
  * License terms: GNU General Public License (GPL) version 2
  */
 
 #include <linux/platform_device.h>
-#include <linux/amba/bus.h>
 #include <linux/io.h>
-#include <linux/clk.h>
+#include <linux/mfd/dbx500-prcmu.h>
+#include <linux/clksrc-dbx500-prcmu.h>
+#include <linux/sys_soc.h>
+#include <linux/err.h>
+#include <linux/slab.h>
+#include <linux/stat.h>
+#include <linux/of.h>
+#include <linux/of_irq.h>
+#include <linux/irq.h>
+#include <linux/irqchip.h>
+#include <linux/irqchip/arm-gic.h>
+#include <linux/platform_data/clk-ux500.h>
+#include <linux/platform_data/arm-ux500-pm.h>
 
-#include <asm/hardware/cache-l2x0.h>
-#include <asm/hardware/gic.h>
 #include <asm/mach/map.h>
-#include <asm/localtimer.h>
 
-#include <plat/mtu.h>
-#include <mach/hardware.h>
-#include <mach/setup.h>
-#include <mach/devices.h>
+#include "setup.h"
+#include "devices.h"
 
-#include "clock.h"
+#include "board-mop500.h"
+#include "db8500-regs.h"
+#include "id.h"
 
-static struct map_desc ux500_io_desc[] __initdata = {
-	__IO_DEV_DESC(UX500_UART0_BASE, SZ_4K),
-	__IO_DEV_DESC(UX500_UART2_BASE, SZ_4K),
-
-	__IO_DEV_DESC(UX500_GIC_CPU_BASE, SZ_4K),
-	__IO_DEV_DESC(UX500_GIC_DIST_BASE, SZ_4K),
-	__IO_DEV_DESC(UX500_L2CC_BASE, SZ_4K),
-	__IO_DEV_DESC(UX500_TWD_BASE, SZ_4K),
-	__IO_DEV_DESC(UX500_SCU_BASE, SZ_4K),
-
-	__IO_DEV_DESC(UX500_CLKRST1_BASE, SZ_4K),
-	__IO_DEV_DESC(UX500_CLKRST2_BASE, SZ_4K),
-	__IO_DEV_DESC(UX500_CLKRST3_BASE, SZ_4K),
-	__IO_DEV_DESC(UX500_CLKRST5_BASE, SZ_4K),
-	__IO_DEV_DESC(UX500_CLKRST6_BASE, SZ_4K),
-
-	__IO_DEV_DESC(UX500_MTU0_BASE, SZ_4K),
-	__IO_DEV_DESC(UX500_MTU1_BASE, SZ_4K),
-
-	__IO_DEV_DESC(UX500_BACKUPRAM0_BASE, SZ_8K),
-};
-
-static struct amba_device *ux500_amba_devs[] __initdata = {
-	&ux500_pl031_device,
-};
-
-void __init ux500_map_io(void)
-{
-	iotable_init(ux500_io_desc, ARRAY_SIZE(ux500_io_desc));
-}
-
-void __init ux500_init_devices(void)
-{
-	amba_add_devices(ux500_amba_devs, ARRAY_SIZE(ux500_amba_devs));
-}
-
+/*
+ * FIXME: Should we set up the GPIO domain here?
+ *
+ * The problem is that we cannot put the interrupt resources into the platform
+ * device until the irqdomain has been added. Right now, we set the GIC interrupt
+ * domain from init_irq(), then load the gpio driver from
+ * core_initcall(nmk_gpio_init) and add the platform devices from
+ * arch_initcall(customize_machine).
+ *
+ * This feels fragile because it depends on the gpio device getting probed
+ * _before_ any device uses the gpio interrupts.
+*/
 void __init ux500_init_irq(void)
 {
-	gic_dist_init(0, __io_address(UX500_GIC_DIST_BASE), 29);
-	gic_cpu_init(0, __io_address(UX500_GIC_CPU_BASE));
+	void __iomem *dist_base;
+	void __iomem *cpu_base;
+
+	gic_arch_extn.flags = IRQCHIP_SKIP_SET_WAKE | IRQCHIP_MASK_ON_SUSPEND;
+
+	if (cpu_is_u8500_family() || cpu_is_ux540_family()) {
+		dist_base = __io_address(U8500_GIC_DIST_BASE);
+		cpu_base = __io_address(U8500_GIC_CPU_BASE);
+	} else
+		ux500_unknown_soc();
+
+#ifdef CONFIG_OF
+	if (of_have_populated_dt())
+		irqchip_init();
+	else
+#endif
+		gic_init(0, 29, dist_base, cpu_base);
 
 	/*
 	 * Init clocks here so that they are available for system timer
 	 * initialization.
 	 */
-	clk_init();
+	if (cpu_is_u8500_family()) {
+		prcmu_early_init(U8500_PRCMU_BASE, SZ_8K - 1);
+		ux500_pm_init(U8500_PRCMU_BASE, SZ_8K - 1);
+		u8500_clk_init(U8500_CLKRST1_BASE, U8500_CLKRST2_BASE,
+			       U8500_CLKRST3_BASE, U8500_CLKRST5_BASE,
+			       U8500_CLKRST6_BASE);
+	} else if (cpu_is_u9540()) {
+		prcmu_early_init(U8500_PRCMU_BASE, SZ_8K - 1);
+		ux500_pm_init(U8500_PRCMU_BASE, SZ_8K - 1);
+		u8500_clk_init(U8500_CLKRST1_BASE, U8500_CLKRST2_BASE,
+			       U8500_CLKRST3_BASE, U8500_CLKRST5_BASE,
+			       U8500_CLKRST6_BASE);
+	} else if (cpu_is_u8540()) {
+		prcmu_early_init(U8500_PRCMU_BASE, SZ_8K + SZ_4K - 1);
+		ux500_pm_init(U8500_PRCMU_BASE, SZ_8K + SZ_4K - 1);
+		u8540_clk_init();
+	}
 }
 
-#ifdef CONFIG_CACHE_L2X0
-static int ux500_l2x0_init(void)
+void __init ux500_init_late(void)
 {
-	void __iomem *l2x0_base;
-
-	l2x0_base = __io_address(UX500_L2CC_BASE);
-
-	/* 64KB way size, 8 way associativity, force WA */
-	l2x0_init(l2x0_base, 0x3e060000, 0xc0000fff);
-
-	return 0;
+	mop500_uib_init();
 }
-early_initcall(ux500_l2x0_init);
-#endif
 
-static void __init ux500_timer_init(void)
+static const char * __init ux500_get_machine(void)
 {
-#ifdef CONFIG_LOCAL_TIMERS
-	/* Setup the local timer base */
-	twd_base = __io_address(UX500_TWD_BASE);
-#endif
-	/* Setup the MTU base */
-	if (cpu_is_u8500ed())
-		mtu_base = __io_address(U8500_MTU0_BASE_ED);
-	else
-		mtu_base = __io_address(UX500_MTU0_BASE);
-
-	nmdk_timer_init();
+	return kasprintf(GFP_KERNEL, "DB%4x", dbx500_partnumber());
 }
 
-struct sys_timer ux500_timer = {
-	.init	= ux500_timer_init,
-};
+static const char * __init ux500_get_family(void)
+{
+	return kasprintf(GFP_KERNEL, "ux500");
+}
+
+static const char * __init ux500_get_revision(void)
+{
+	unsigned int rev = dbx500_revision();
+
+	if (rev == 0x01)
+		return kasprintf(GFP_KERNEL, "%s", "ED");
+	else if (rev >= 0xA0)
+		return kasprintf(GFP_KERNEL, "%d.%d",
+				 (rev >> 4) - 0xA + 1, rev & 0xf);
+
+	return kasprintf(GFP_KERNEL, "%s", "Unknown");
+}
+
+static ssize_t ux500_get_process(struct device *dev,
+					struct device_attribute *attr,
+					char *buf)
+{
+	if (dbx500_id.process == 0x00)
+		return sprintf(buf, "Standard\n");
+
+	return sprintf(buf, "%02xnm\n", dbx500_id.process);
+}
+
+static void __init soc_info_populate(struct soc_device_attribute *soc_dev_attr,
+				     const char *soc_id)
+{
+	soc_dev_attr->soc_id   = soc_id;
+	soc_dev_attr->machine  = ux500_get_machine();
+	soc_dev_attr->family   = ux500_get_family();
+	soc_dev_attr->revision = ux500_get_revision();
+}
+
+struct device_attribute ux500_soc_attr =
+	__ATTR(process,  S_IRUGO, ux500_get_process,  NULL);
+
+struct device * __init ux500_soc_device_init(const char *soc_id)
+{
+	struct device *parent;
+	struct soc_device *soc_dev;
+	struct soc_device_attribute *soc_dev_attr;
+
+	soc_dev_attr = kzalloc(sizeof(*soc_dev_attr), GFP_KERNEL);
+	if (!soc_dev_attr)
+		return ERR_PTR(-ENOMEM);
+
+	soc_info_populate(soc_dev_attr, soc_id);
+
+	soc_dev = soc_device_register(soc_dev_attr);
+	if (IS_ERR(soc_dev)) {
+	        kfree(soc_dev_attr);
+		return NULL;
+	}
+
+	parent = soc_device_to_device(soc_dev);
+	device_create_file(parent, &ux500_soc_attr);
+
+	return parent;
+}

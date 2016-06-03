@@ -7,7 +7,7 @@
  * Copyright (C) 1999, 2000 Silicon Graphics, Inc.
  *
  * Protected memory access.  Used for everything that might take revenge
- * by sending a DBE error like accessing possibly non-existant memory or
+ * by sending a DBE error like accessing possibly non-existent memory or
  * devices.
  */
 #ifndef _ASM_PACCESS_H
@@ -43,7 +43,7 @@ struct __large_pstruct { unsigned long buf[100]; };
 	case 1: __get_dbe_asm("lb"); break;				\
 	case 2: __get_dbe_asm("lh"); break;				\
 	case 4: __get_dbe_asm("lw"); break;				\
-	case 8:  __get_dbe_asm("ld"); break;				\
+	case 8:	 __get_dbe_asm("ld"); break;				\
 	default: __get_dbe_unknown(); break;				\
 	}								\
 	x = (__typeof__(*(ptr))) __gu_val;				\

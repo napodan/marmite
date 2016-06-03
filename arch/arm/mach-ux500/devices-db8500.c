@@ -11,190 +11,160 @@
 #include <linux/io.h>
 #include <linux/gpio.h>
 #include <linux/amba/bus.h>
+#include <linux/amba/pl022.h>
+#include <linux/platform_data/dma-ste-dma40.h>
+#include <linux/mfd/dbx500-prcmu.h>
 
-#include <plat/ste_dma40.h>
+#include "setup.h"
+#include "irqs.h"
 
-#include <mach/hardware.h>
-#include <mach/setup.h>
-
+#include "db8500-regs.h"
+#include "devices-db8500.h"
 #include "ste-dma40-db8500.h"
-
-static struct nmk_gpio_platform_data u8500_gpio_data[] = {
-	GPIO_DATA("GPIO-0-31", 0),
-	GPIO_DATA("GPIO-32-63", 32), /* 37..63 not routed to pin */
-	GPIO_DATA("GPIO-64-95", 64),
-	GPIO_DATA("GPIO-96-127", 96), /* 98..127 not routed to pin */
-	GPIO_DATA("GPIO-128-159", 128),
-	GPIO_DATA("GPIO-160-191", 160), /* 172..191 not routed to pin */
-	GPIO_DATA("GPIO-192-223", 192),
-	GPIO_DATA("GPIO-224-255", 224), /* 231..255 not routed to pin */
-	GPIO_DATA("GPIO-256-288", 256), /* 268..288 not routed to pin */
-};
-
-static struct resource u8500_gpio_resources[] = {
-	GPIO_RESOURCE(0),
-	GPIO_RESOURCE(1),
-	GPIO_RESOURCE(2),
-	GPIO_RESOURCE(3),
-	GPIO_RESOURCE(4),
-	GPIO_RESOURCE(5),
-	GPIO_RESOURCE(6),
-	GPIO_RESOURCE(7),
-	GPIO_RESOURCE(8),
-};
-
-struct platform_device u8500_gpio_devs[] = {
-	GPIO_DEVICE(0),
-	GPIO_DEVICE(1),
-	GPIO_DEVICE(2),
-	GPIO_DEVICE(3),
-	GPIO_DEVICE(4),
-	GPIO_DEVICE(5),
-	GPIO_DEVICE(6),
-	GPIO_DEVICE(7),
-	GPIO_DEVICE(8),
-};
-
-struct amba_device u8500_ssp0_device = {
-	.dev = {
-		.coherent_dma_mask = ~0,
-		.init_name = "ssp0",
-	},
-	.res = {
-		.start = U8500_SSP0_BASE,
-		.end   = U8500_SSP0_BASE + SZ_4K - 1,
-		.flags = IORESOURCE_MEM,
-	},
-	.irq = {IRQ_SSP0, NO_IRQ },
-	/* ST-Ericsson modified id */
-	.periphid = SSP_PER_ID,
-};
-
-static struct resource u8500_i2c0_resources[] = {
-	[0] = {
-		.start	= U8500_I2C0_BASE,
-		.end	= U8500_I2C0_BASE + SZ_4K - 1,
-		.flags	= IORESOURCE_MEM,
-	},
-	[1] = {
-		.start	= IRQ_I2C0,
-		.end	= IRQ_I2C0,
-		.flags	= IORESOURCE_IRQ,
-	}
-};
-
-struct platform_device u8500_i2c0_device = {
-	.name		= "nmk-i2c",
-	.id		= 0,
-	.resource	= u8500_i2c0_resources,
-	.num_resources	= ARRAY_SIZE(u8500_i2c0_resources),
-};
-
-static struct resource u8500_i2c4_resources[] = {
-	[0] = {
-		.start	= U8500_I2C4_BASE,
-		.end	= U8500_I2C4_BASE + SZ_4K - 1,
-		.flags	= IORESOURCE_MEM,
-	},
-	[1] = {
-		.start	= IRQ_I2C4,
-		.end	= IRQ_I2C4,
-		.flags	= IORESOURCE_IRQ,
-	}
-};
-
-struct platform_device u8500_i2c4_device = {
-	.name		= "nmk-i2c",
-	.id		= 4,
-	.resource	= u8500_i2c4_resources,
-	.num_resources	= ARRAY_SIZE(u8500_i2c4_resources),
-};
 
 static struct resource dma40_resources[] = {
 	[0] = {
 		.start = U8500_DMA_BASE,
-		.end = U8500_DMA_BASE + SZ_4K - 1,
+		.end   = U8500_DMA_BASE + SZ_4K - 1,
 		.flags = IORESOURCE_MEM,
-		.name = "base",
+		.name  = "base",
 	},
 	[1] = {
 		.start = U8500_DMA_LCPA_BASE,
-		.end = U8500_DMA_LCPA_BASE + SZ_4K - 1,
+		.end   = U8500_DMA_LCPA_BASE + 2 * SZ_1K - 1,
 		.flags = IORESOURCE_MEM,
-		.name = "lcpa",
+		.name  = "lcpa",
 	},
 	[2] = {
-		.start = U8500_DMA_LCLA_BASE,
-		.end = U8500_DMA_LCLA_BASE + 16 * 1024 - 1,
-		.flags = IORESOURCE_MEM,
-		.name = "lcla",
-	},
-	[3] = {
-		.start = IRQ_DMA,
-		.end = IRQ_DMA,
-		.flags = IORESOURCE_IRQ}
+		.start = IRQ_DB8500_DMA,
+		.end   = IRQ_DB8500_DMA,
+		.flags = IORESOURCE_IRQ,
+	}
 };
 
 /* Default configuration for physcial memcpy */
 struct stedma40_chan_cfg dma40_memcpy_conf_phy = {
-	.channel_type = (STEDMA40_CHANNEL_IN_PHY_MODE |
-			 STEDMA40_LOW_PRIORITY_CHANNEL |
-			 STEDMA40_PCHAN_BASIC_MODE),
+	.mode = STEDMA40_MODE_PHYSICAL,
 	.dir = STEDMA40_MEM_TO_MEM,
 
-	.src_info.endianess = STEDMA40_LITTLE_ENDIAN,
 	.src_info.data_width = STEDMA40_BYTE_WIDTH,
 	.src_info.psize = STEDMA40_PSIZE_PHY_1,
+	.src_info.flow_ctrl = STEDMA40_NO_FLOW_CTRL,
 
-	.dst_info.endianess = STEDMA40_LITTLE_ENDIAN,
 	.dst_info.data_width = STEDMA40_BYTE_WIDTH,
 	.dst_info.psize = STEDMA40_PSIZE_PHY_1,
-
+	.dst_info.flow_ctrl = STEDMA40_NO_FLOW_CTRL,
 };
 /* Default configuration for logical memcpy */
 struct stedma40_chan_cfg dma40_memcpy_conf_log = {
-	.channel_type = (STEDMA40_CHANNEL_IN_LOG_MODE |
-			 STEDMA40_LOW_PRIORITY_CHANNEL |
-			 STEDMA40_LCHAN_SRC_LOG_DST_LOG |
-			 STEDMA40_NO_TIM_FOR_LINK),
 	.dir = STEDMA40_MEM_TO_MEM,
 
-	.src_info.endianess = STEDMA40_LITTLE_ENDIAN,
 	.src_info.data_width = STEDMA40_BYTE_WIDTH,
 	.src_info.psize = STEDMA40_PSIZE_LOG_1,
+	.src_info.flow_ctrl = STEDMA40_NO_FLOW_CTRL,
 
-	.dst_info.endianess = STEDMA40_LITTLE_ENDIAN,
 	.dst_info.data_width = STEDMA40_BYTE_WIDTH,
 	.dst_info.psize = STEDMA40_PSIZE_LOG_1,
-
+	.dst_info.flow_ctrl = STEDMA40_NO_FLOW_CTRL,
 };
 
 /*
  * Mapping between destination event lines and physical device address.
- * The event line is tied to a device and therefor the address is constant.
+ * The event line is tied to a device and therefore the address is constant.
+ * When the address comes from a primecell it will be configured in runtime
+ * and we set the address to -1 as a placeholder.
  */
-static const dma_addr_t dma40_tx_map[STEDMA40_NR_DEV];
+static const dma_addr_t dma40_tx_map[DB8500_DMA_NR_DEV] = {
+	/* MUSB - these will be runtime-reconfigured */
+	[DB8500_DMA_DEV39_USB_OTG_OEP_8] = -1,
+	[DB8500_DMA_DEV16_USB_OTG_OEP_7_15] = -1,
+	[DB8500_DMA_DEV17_USB_OTG_OEP_6_14] = -1,
+	[DB8500_DMA_DEV18_USB_OTG_OEP_5_13] = -1,
+	[DB8500_DMA_DEV19_USB_OTG_OEP_4_12] = -1,
+	[DB8500_DMA_DEV36_USB_OTG_OEP_3_11] = -1,
+	[DB8500_DMA_DEV37_USB_OTG_OEP_2_10] = -1,
+	[DB8500_DMA_DEV38_USB_OTG_OEP_1_9] = -1,
+	/* PrimeCells - run-time configured */
+	[DB8500_DMA_DEV0_SPI0_TX] = -1,
+	[DB8500_DMA_DEV1_SD_MMC0_TX] = -1,
+	[DB8500_DMA_DEV2_SD_MMC1_TX] = -1,
+	[DB8500_DMA_DEV3_SD_MMC2_TX] = -1,
+	[DB8500_DMA_DEV8_SSP0_TX] = -1,
+	[DB8500_DMA_DEV9_SSP1_TX] = -1,
+	[DB8500_DMA_DEV11_UART2_TX] = -1,
+	[DB8500_DMA_DEV12_UART1_TX] = -1,
+	[DB8500_DMA_DEV13_UART0_TX] = -1,
+	[DB8500_DMA_DEV28_SD_MM2_TX] = -1,
+	[DB8500_DMA_DEV29_SD_MM0_TX] = -1,
+	[DB8500_DMA_DEV32_SD_MM1_TX] = -1,
+	[DB8500_DMA_DEV33_SPI2_TX] = -1,
+	[DB8500_DMA_DEV35_SPI1_TX] = -1,
+	[DB8500_DMA_DEV40_SPI3_TX] = -1,
+	[DB8500_DMA_DEV41_SD_MM3_TX] = -1,
+	[DB8500_DMA_DEV42_SD_MM4_TX] = -1,
+	[DB8500_DMA_DEV43_SD_MM5_TX] = -1,
+	[DB8500_DMA_DEV14_MSP2_TX] = U8500_MSP2_BASE + MSP_TX_RX_REG_OFFSET,
+	[DB8500_DMA_DEV30_MSP1_TX] = U8500_MSP1_BASE + MSP_TX_RX_REG_OFFSET,
+	[DB8500_DMA_DEV31_MSP0_TX_SLIM0_CH0_TX] = U8500_MSP0_BASE + MSP_TX_RX_REG_OFFSET,
+	[DB8500_DMA_DEV48_CAC1_TX] = U8500_CRYP1_BASE + CRYP1_TX_REG_OFFSET,
+	[DB8500_DMA_DEV50_HAC1_TX] = U8500_HASH1_BASE + HASH1_TX_REG_OFFSET,
+};
 
 /* Mapping between source event lines and physical device address */
-static const dma_addr_t dma40_rx_map[STEDMA40_NR_DEV];
+static const dma_addr_t dma40_rx_map[DB8500_DMA_NR_DEV] = {
+	/* MUSB - these will be runtime-reconfigured */
+	[DB8500_DMA_DEV39_USB_OTG_IEP_8] = -1,
+	[DB8500_DMA_DEV16_USB_OTG_IEP_7_15] = -1,
+	[DB8500_DMA_DEV17_USB_OTG_IEP_6_14] = -1,
+	[DB8500_DMA_DEV18_USB_OTG_IEP_5_13] = -1,
+	[DB8500_DMA_DEV19_USB_OTG_IEP_4_12] = -1,
+	[DB8500_DMA_DEV36_USB_OTG_IEP_3_11] = -1,
+	[DB8500_DMA_DEV37_USB_OTG_IEP_2_10] = -1,
+	[DB8500_DMA_DEV38_USB_OTG_IEP_1_9] = -1,
+	/* PrimeCells */
+	[DB8500_DMA_DEV0_SPI0_RX] = -1,
+	[DB8500_DMA_DEV1_SD_MMC0_RX] = -1,
+	[DB8500_DMA_DEV2_SD_MMC1_RX] = -1,
+	[DB8500_DMA_DEV3_SD_MMC2_RX] = -1,
+	[DB8500_DMA_DEV8_SSP0_RX] = -1,
+	[DB8500_DMA_DEV9_SSP1_RX] = -1,
+	[DB8500_DMA_DEV11_UART2_RX] = -1,
+	[DB8500_DMA_DEV12_UART1_RX] = -1,
+	[DB8500_DMA_DEV13_UART0_RX] = -1,
+	[DB8500_DMA_DEV28_SD_MM2_RX] = -1,
+	[DB8500_DMA_DEV29_SD_MM0_RX] = -1,
+	[DB8500_DMA_DEV32_SD_MM1_RX] = -1,
+	[DB8500_DMA_DEV33_SPI2_RX] = -1,
+	[DB8500_DMA_DEV35_SPI1_RX] = -1,
+	[DB8500_DMA_DEV40_SPI3_RX] = -1,
+	[DB8500_DMA_DEV41_SD_MM3_RX] = -1,
+	[DB8500_DMA_DEV42_SD_MM4_RX] = -1,
+	[DB8500_DMA_DEV43_SD_MM5_RX] = -1,
+	[DB8500_DMA_DEV14_MSP2_RX] = U8500_MSP2_BASE + MSP_TX_RX_REG_OFFSET,
+	[DB8500_DMA_DEV30_MSP3_RX] = U8500_MSP3_BASE + MSP_TX_RX_REG_OFFSET,
+	[DB8500_DMA_DEV31_MSP0_RX_SLIM0_CH0_RX] = U8500_MSP0_BASE + MSP_TX_RX_REG_OFFSET,
+	[DB8500_DMA_DEV48_CAC1_RX] = U8500_CRYP1_BASE + CRYP1_RX_REG_OFFSET,
+};
 
 /* Reserved event lines for memcpy only */
 static int dma40_memcpy_event[] = {
-	STEDMA40_MEMCPY_TX_1,
-	STEDMA40_MEMCPY_TX_2,
-	STEDMA40_MEMCPY_TX_3,
-	STEDMA40_MEMCPY_TX_4,
+	DB8500_DMA_MEMCPY_TX_0,
+	DB8500_DMA_MEMCPY_TX_1,
+	DB8500_DMA_MEMCPY_TX_2,
+	DB8500_DMA_MEMCPY_TX_3,
+	DB8500_DMA_MEMCPY_TX_4,
+	DB8500_DMA_MEMCPY_TX_5,
 };
 
 static struct stedma40_platform_data dma40_plat_data = {
-	.dev_len = STEDMA40_NR_DEV,
+	.dev_len = DB8500_DMA_NR_DEV,
 	.dev_rx = dma40_rx_map,
 	.dev_tx = dma40_tx_map,
 	.memcpy = dma40_memcpy_event,
 	.memcpy_len = ARRAY_SIZE(dma40_memcpy_event),
 	.memcpy_conf_phy = &dma40_memcpy_conf_phy,
 	.memcpy_conf_log = &dma40_memcpy_conf_log,
-	.llis_per_log = 8,
+	.disabled_channels = {-1},
 };
 
 struct platform_device u8500_dma40_device = {
@@ -207,10 +177,66 @@ struct platform_device u8500_dma40_device = {
 	.resource = dma40_resources
 };
 
-void dma40_u8500ed_fixup(void)
-{
-	dma40_plat_data.memcpy = NULL;
-	dma40_plat_data.memcpy_len = 0;
-	dma40_resources[0].start = U8500_DMA_BASE_ED;
-	dma40_resources[0].end = U8500_DMA_BASE_ED + SZ_4K - 1;
-}
+struct resource keypad_resources[] = {
+	[0] = {
+		.start = U8500_SKE_BASE,
+		.end = U8500_SKE_BASE + SZ_4K - 1,
+		.flags = IORESOURCE_MEM,
+	},
+	[1] = {
+		.start = IRQ_DB8500_KB,
+		.end = IRQ_DB8500_KB,
+		.flags = IORESOURCE_IRQ,
+	},
+};
+
+struct platform_device u8500_ske_keypad_device = {
+	.name = "nmk-ske-keypad",
+	.id = -1,
+	.num_resources = ARRAY_SIZE(keypad_resources),
+	.resource = keypad_resources,
+};
+
+struct prcmu_pdata db8500_prcmu_pdata = {
+	.ab_platdata	= &ab8500_platdata,
+	.ab_irq		= IRQ_DB8500_AB8500,
+	.irq_base	= IRQ_PRCMU_BASE,
+	.version_offset	= DB8500_PRCMU_FW_VERSION_OFFSET,
+	.legacy_offset	= DB8500_PRCMU_LEGACY_OFFSET,
+};
+
+static struct resource db8500_prcmu_res[] = {
+	{
+		.name  = "prcmu",
+		.start = U8500_PRCMU_BASE,
+		.end   = U8500_PRCMU_BASE + SZ_8K - 1,
+		.flags = IORESOURCE_MEM,
+	},
+	{
+		.name  = "prcmu-tcdm",
+		.start = U8500_PRCMU_TCDM_BASE,
+		.end   = U8500_PRCMU_TCDM_BASE + SZ_4K - 1,
+		.flags = IORESOURCE_MEM,
+	},
+	{
+		.name  = "irq",
+		.start = IRQ_DB8500_PRCMU1,
+		.end   = IRQ_DB8500_PRCMU1,
+		.flags = IORESOURCE_IRQ,
+	},
+	{
+		.name  = "prcmu-tcpm",
+		.start = U8500_PRCMU_TCPM_BASE,
+		.end   = U8500_PRCMU_TCPM_BASE + SZ_4K - 1,
+		.flags = IORESOURCE_MEM,
+	},
+};
+
+struct platform_device db8500_prcmu_device = {
+	.name			= "db8500-prcmu",
+	.resource		= db8500_prcmu_res,
+	.num_resources		= ARRAY_SIZE(db8500_prcmu_res),
+	.dev = {
+		.platform_data = &db8500_prcmu_pdata,
+	},
+};

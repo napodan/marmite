@@ -56,7 +56,6 @@ PLAT_NODE_DATA_LOCALNR(unsigned long p, int n)
  * Given a kernel address, find the home node of the underlying memory.
  */
 #define kvaddr_to_nid(kaddr)	pa_to_nid(__pa(kaddr))
-#define node_start_pfn(nid)	(NODE_DATA(nid)->node_start_pfn)
 
 /*
  * Given a kaddr, LOCAL_BASE_ADDR finds the owning node of the memory
@@ -67,7 +66,7 @@ PLAT_NODE_DATA_LOCALNR(unsigned long p, int n)
     ((unsigned long)__va(NODE_DATA(kvaddr_to_nid(kaddr))->node_start_pfn  \
 			 << PAGE_SHIFT))
 
-/* XXX: FIXME -- wli */
+/* XXX: FIXME -- nyc */
 #define kern_addr_valid(kaddr)	(0)
 
 #define virt_to_page(kaddr)	pfn_to_page(__pa(kaddr) >> PAGE_SHIFT)

@@ -62,7 +62,7 @@ static struct irqaction itu_irq = {
 	.flags		= IRQF_DISABLED | IRQF_TIMER,
 };
 
-static const int __initdata divide_rate[] = {1, 2, 4, 8};
+static const int __initconst divide_rate[] = {1, 2, 4, 8};
 
 void __init h8300_timer_setup(void)
 {
@@ -73,7 +73,7 @@ void __init h8300_timer_setup(void)
 
 	setup_irq(ITUIRQ, &itu_irq);
 
-	/* initalize timer */
+	/* initialize timer */
 	ctrl_outb(0, TSTR);
 	ctrl_outb(CCLR0 | div, ITUBASE + TCR);
 	ctrl_outb(0x01, ITUBASE + TIER);

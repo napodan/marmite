@@ -7,7 +7,7 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
-
+#include <linux/gpio.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -22,10 +22,9 @@
 
 #include <asm/mach-types.h>
 
-#include <plat/board.h>
-#include <plat/mux.h>
-#include <mach/gpio.h>
-#include <plat/fpga.h>
+#include <mach/mux.h>
+
+#include "pm.h"
 
 static struct clk * uart1_ck;
 static struct clk * uart2_ck;
@@ -52,9 +51,11 @@ static inline void omap_serial_outp(struct plat_serial8250_port *p, int offset,
  */
 static void __init omap_serial_reset(struct plat_serial8250_port *p)
 {
-	omap_serial_outp(p, UART_OMAP_MDR1, 0x07);	/* disable UART */
+	omap_serial_outp(p, UART_OMAP_MDR1,
+			UART_OMAP_MDR1_DISABLE);	/* disable UART */
 	omap_serial_outp(p, UART_OMAP_SCR, 0x08);	/* TX watermark */
-	omap_serial_outp(p, UART_OMAP_MDR1, 0x00);	/* enable UART */
+	omap_serial_outp(p, UART_OMAP_MDR1,
+			UART_OMAP_MDR1_16X_MODE);	/* enable UART */
 
 	if (!cpu_is_omap15xx()) {
 		omap_serial_outp(p, UART_OMAP_SYSC, 0x01);
@@ -121,6 +122,13 @@ void __init omap_serial_init(void)
 	}
 
 	for (i = 0; i < ARRAY_SIZE(serial_platform_data) - 1; i++) {
+
+		/* Don't look at UARTs higher than 2 for omap7xx */
+		if (cpu_is_omap7xx() && i > 1) {
+			serial_platform_data[i].membase = NULL;
+			serial_platform_data[i].mapbase = 0;
+			continue;
+		}
 
 		/* Static mapping, never released */
 		serial_platform_data[i].membase =
@@ -227,7 +235,7 @@ static void __init omap_serial_set_port_wakeup(int gpio_nr)
 	enable_irq_wake(gpio_to_irq(gpio_nr));
 }
 
-static int __init omap_serial_wakeup_init(void)
+int __init omap_serial_wakeup_init(void)
 {
 	if (!cpu_is_omap16xx())
 		return 0;
@@ -241,12 +249,14 @@ static int __init omap_serial_wakeup_init(void)
 
 	return 0;
 }
-late_initcall(omap_serial_wakeup_init);
 
 #endif	/* CONFIG_OMAP_SERIAL_WAKE */
 
 static int __init omap_init(void)
 {
+	if (!cpu_class_is_omap1())
+		return -ENODEV;
+
 	return platform_device_register(&serial_device);
 }
 arch_initcall(omap_init);

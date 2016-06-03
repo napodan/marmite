@@ -44,7 +44,7 @@ static cycle_t sb1250_hpt_read(struct clocksource *cs)
 
 struct clocksource bcm1250_clocksource = {
 	.name	= "bcm1250-counter-3",
-	.rating	= 200,
+	.rating = 200,
 	.read	= sb1250_hpt_read,
 	.mask	= CLOCKSOURCE_MASK(23),
 	.flags	= CLOCK_SOURCE_IS_CONTINUOUS,
@@ -65,6 +65,5 @@ void __init sb1250_clocksource_init(void)
 		     IOADDR(A_SCD_TIMER_REGISTER(SB1250_HPT_NUM,
 						 R_SCD_TIMER_CFG)));
 
-	clocksource_set_clock(cs, V_SCD_TIMER_FREQ);
-	clocksource_register(cs);
+	clocksource_register_hz(cs, V_SCD_TIMER_FREQ);
 }

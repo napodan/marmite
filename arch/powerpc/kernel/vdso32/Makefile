@@ -1,7 +1,9 @@
 
 # List of files in the vdso, has to be asm only for now
 
-obj-vdso32 = sigtramp.o gettimeofday.o datapage.o cacheflush.o note.o
+obj-vdso32-$(CONFIG_PPC64) = getcpu.o
+obj-vdso32 = sigtramp.o gettimeofday.o datapage.o cacheflush.o note.o \
+		$(obj-vdso32-y)
 
 # Build rules
 
@@ -14,10 +16,10 @@ obj-vdso32 := $(addprefix $(obj)/, $(obj-vdso32))
 
 GCOV_PROFILE := n
 
-EXTRA_CFLAGS := -shared -fno-common -fno-builtin
-EXTRA_CFLAGS += -nostdlib -Wl,-soname=linux-vdso32.so.1 \
+ccflags-y := -shared -fno-common -fno-builtin
+ccflags-y += -nostdlib -Wl,-soname=linux-vdso32.so.1 \
 		$(call cc-ldoption, -Wl$(comma)--hash-style=sysv)
-EXTRA_AFLAGS := -D__VDSO32__ -s
+asflags-y := -D__VDSO32__ -s
 
 obj-y += vdso32_wrapper.o
 extra-y += vdso32.lds

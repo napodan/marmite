@@ -1,7 +1,7 @@
 /*
  *  Collaborative memory management interface.
  *
- *    Copyright IBM Corp 2003,2010
+ *    Copyright IBM Corp 2003, 2010
  *    Author(s): Martin Schwidefsky <schwidefsky@de.ibm.com>,
  *
  */
@@ -23,7 +23,10 @@
 #include <asm/pgalloc.h>
 #include <asm/diag.h>
 
-static char *sender = "VMRMSVM";
+#ifdef CONFIG_CMM_IUCV
+static char *cmm_default_sender = "VMRMSVM";
+#endif
+static char *sender;
 module_param(sender, charp, 0400);
 MODULE_PARM_DESC(sender,
 		 "Guest name that may send SMSG messages (default VMRMSVM)");
@@ -88,7 +91,7 @@ static long cmm_alloc_pages(long nr, long *counter,
 			} else
 				free_page((unsigned long) npa);
 		}
-		diag10(addr);
+		diag10_range(addr >> PAGE_SHIFT, 1);
 		pa->pages[pa->index++] = addr;
 		(*counter)++;
 		spin_unlock(&cmm_lock);
@@ -427,7 +430,7 @@ static struct notifier_block cmm_power_notifier = {
 	.notifier_call = cmm_power_event,
 };
 
-static int cmm_init(void)
+static int __init cmm_init(void)
 {
 	int rc = -ENOMEM;
 
@@ -435,6 +438,15 @@ static int cmm_init(void)
 	if (!cmm_sysctl_header)
 		goto out_sysctl;
 #ifdef CONFIG_CMM_IUCV
+	/* convert sender to uppercase characters */
+	if (sender) {
+		int len = strlen(sender);
+		while (len--)
+			sender[len] = toupper(sender[len]);
+	} else {
+		sender = cmm_default_sender;
+	}
+
 	rc = smsg_register_callback(SMSG_PREFIX, cmm_smsg_target);
 	if (rc < 0)
 		goto out_smsg;
@@ -446,12 +458,10 @@ static int cmm_init(void)
 	if (rc)
 		goto out_pm;
 	cmm_thread_ptr = kthread_run(cmm_thread, NULL, "cmmthread");
-	rc = IS_ERR(cmm_thread_ptr) ? PTR_ERR(cmm_thread_ptr) : 0;
-	if (rc)
-		goto out_kthread;
-	return 0;
+	if (!IS_ERR(cmm_thread_ptr))
+		return 0;
 
-out_kthread:
+	rc = PTR_ERR(cmm_thread_ptr);
 	unregister_pm_notifier(&cmm_power_notifier);
 out_pm:
 	unregister_oom_notifier(&cmm_oom_nb);
@@ -467,7 +477,7 @@ out_sysctl:
 }
 module_init(cmm_init);
 
-static void cmm_exit(void)
+static void __exit cmm_exit(void)
 {
 	unregister_sysctl_table(cmm_sysctl_header);
 #ifdef CONFIG_CMM_IUCV

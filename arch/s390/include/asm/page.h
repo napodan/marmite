@@ -1,8 +1,6 @@
 /*
- *  include/asm-s390/page.h
- *
  *  S390 version
- *    Copyright (C) 1999,2000 IBM Deutschland Entwicklung GmbH, IBM Corporation
+ *    Copyright IBM Corp. 1999, 2000
  *    Author(s): Hartmut Penner (hp@de.ibm.com)
  */
 
@@ -32,21 +30,27 @@
 #include <asm/setup.h>
 #ifndef __ASSEMBLY__
 
+void storage_key_init_range(unsigned long start, unsigned long end);
+
+static inline unsigned long pfmf(unsigned long function, unsigned long address)
+{
+	asm volatile(
+		"	.insn	rre,0xb9af0000,%[function],%[address]"
+		: [address] "+a" (address)
+		: [function] "d" (function)
+		: "memory");
+	return address;
+}
+
 static inline void clear_page(void *page)
 {
-	if (MACHINE_HAS_PFMF) {
-		asm volatile(
-			"	.insn	rre,0xb9af0000,%0,%1"
-			: : "d" (0x10000), "a" (page) : "memory", "cc");
-	} else {
-		register unsigned long reg1 asm ("1") = 0;
-		register void *reg2 asm ("2") = page;
-		register unsigned long reg3 asm ("3") = 4096;
-		asm volatile(
-			"	mvcl	2,0"
-			: "+d" (reg2), "+d" (reg3) : "d" (reg1)
-			: "memory", "cc");
-	}
+	register unsigned long reg1 asm ("1") = 0;
+	register void *reg2 asm ("2") = page;
+	register unsigned long reg3 asm ("3") = 4096;
+	asm volatile(
+		"	mvcl	2,0"
+		: "+d" (reg2), "+d" (reg3) : "d" (reg1)
+		: "memory", "cc");
 }
 
 static inline void copy_page(void *to, void *from)
@@ -90,6 +94,7 @@ static inline void copy_page(void *to, void *from)
  */
 
 typedef struct { unsigned long pgprot; } pgprot_t;
+typedef struct { unsigned long pgste; } pgste_t;
 typedef struct { unsigned long pte; } pte_t;
 typedef struct { unsigned long pmd; } pmd_t;
 typedef struct { unsigned long pud; } pud_t;
@@ -97,34 +102,72 @@ typedef struct { unsigned long pgd; } pgd_t;
 typedef pte_t *pgtable_t;
 
 #define pgprot_val(x)	((x).pgprot)
+#define pgste_val(x)	((x).pgste)
 #define pte_val(x)	((x).pte)
 #define pmd_val(x)	((x).pmd)
 #define pud_val(x)	((x).pud)
 #define pgd_val(x)      ((x).pgd)
 
+#define __pgste(x)	((pgste_t) { (x) } )
 #define __pte(x)        ((pte_t) { (x) } )
 #define __pmd(x)        ((pmd_t) { (x) } )
+#define __pud(x)	((pud_t) { (x) } )
 #define __pgd(x)        ((pgd_t) { (x) } )
 #define __pgprot(x)     ((pgprot_t) { (x) } )
 
-static inline void
-page_set_storage_key(unsigned long addr, unsigned int skey)
+static inline void page_set_storage_key(unsigned long addr,
+					unsigned char skey, int mapped)
 {
-	asm volatile("sske %0,%1" : : "d" (skey), "a" (addr));
+	if (!mapped)
+		asm volatile(".insn rrf,0xb22b0000,%0,%1,8,0"
+			     : : "d" (skey), "a" (addr));
+	else
+		asm volatile("sske %0,%1" : : "d" (skey), "a" (addr));
 }
 
-static inline unsigned int
-page_get_storage_key(unsigned long addr)
+static inline unsigned char page_get_storage_key(unsigned long addr)
 {
-	unsigned int skey;
+	unsigned char skey;
 
-	asm volatile("iske %0,%1" : "=d" (skey) : "a" (addr), "0" (0));
+	asm volatile("iske %0,%1" : "=d" (skey) : "a" (addr));
 	return skey;
+}
+
+static inline int page_reset_referenced(unsigned long addr)
+{
+	unsigned int ipm;
+
+	asm volatile(
+		"	rrbe	0,%1\n"
+		"	ipm	%0\n"
+		: "=d" (ipm) : "a" (addr) : "cc");
+	return !!(ipm & 0x20000000);
+}
+
+/* Bits int the storage key */
+#define _PAGE_CHANGED		0x02	/* HW changed bit		*/
+#define _PAGE_REFERENCED	0x04	/* HW referenced bit		*/
+#define _PAGE_FP_BIT		0x08	/* HW fetch protection bit	*/
+#define _PAGE_ACC_BITS		0xf0	/* HW access control bits	*/
+
+/*
+ * Test and clear referenced bit in storage key.
+ */
+#define __HAVE_ARCH_PAGE_TEST_AND_CLEAR_YOUNG
+static inline int page_test_and_clear_young(unsigned long pfn)
+{
+	return page_reset_referenced(pfn << PAGE_SHIFT);
 }
 
 struct page;
 void arch_free_page(struct page *page, int order);
 void arch_alloc_page(struct page *page, int order);
+void arch_set_page_states(int make_stable);
+
+static inline int devmem_is_allowed(unsigned long pfn)
+{
+	return 0;
+}
 
 #define HAVE_ARCH_FREE_PAGE
 #define HAVE_ARCH_ALLOC_PAGE

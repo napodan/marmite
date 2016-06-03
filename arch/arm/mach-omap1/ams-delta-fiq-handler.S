@@ -14,11 +14,14 @@
  */
 
 #include <linux/linkage.h>
+#include <asm/assembler.h>
 
-#include <plat/io.h>
-#include <plat/board-ams-delta.h>
+#include <mach/board-ams-delta.h>
 
+#include <mach/irqs.h>
 #include <mach/ams-delta-fiq.h>
+
+#include "iomap.h"
 
 /*
  * GPIO related definitions, copied from arch/arm/plat-omap/gpio.c.
@@ -79,7 +82,7 @@
 
 
 /*
- * Register useage
+ * Register usage
  * r8  - temporary
  * r9  - the driver buffer
  * r10 - temporary

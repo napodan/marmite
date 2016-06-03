@@ -11,12 +11,13 @@
 #include <linux/string.h>
 #include <linux/thread_info.h>
 #include <asm/asi.h>
-#include <asm/system.h>
 #include <asm/spitfire.h>
 #include <asm-generic/uaccess-unaligned.h>
 #endif
 
 #ifndef __ASSEMBLY__
+
+#include <asm/processor.h>
 
 /*
  * Sparc64 is segmented, though more like the M68K than the I386.
@@ -37,14 +38,14 @@
 #define VERIFY_READ	0
 #define VERIFY_WRITE	1
 
-#define get_fs() ((mm_segment_t) { get_thread_current_ds() })
+#define get_fs() ((mm_segment_t){(current_thread_info()->current_ds)})
 #define get_ds() (KERNEL_DS)
 
 #define segment_eq(a,b)  ((a).seg == (b).seg)
 
 #define set_fs(val)								\
 do {										\
-	set_thread_current_ds((val).seg);					\
+	current_thread_info()->current_ds =(val).seg;				\
 	__asm__ __volatile__ ("wr %%g0, %0, %%asi" : : "r" ((val).seg));	\
 } while(0)
 
@@ -205,14 +206,6 @@ __asm__ __volatile__(							\
 
 extern int __get_user_bad(void);
 
-extern void copy_from_user_overflow(void)
-#ifdef CONFIG_DEBUG_STRICT_USER_COPY_CHECKS
-	__compiletime_error("copy_from_user() buffer size is not provably correct")
-#else
-	__compiletime_warning("copy_from_user() buffer size is not provably correct")
-#endif
-;
-
 extern unsigned long __must_check ___copy_from_user(void *to,
 						    const void __user *from,
 						    unsigned long size);
@@ -221,16 +214,11 @@ extern unsigned long copy_from_user_fixup(void *to, const void __user *from,
 static inline unsigned long __must_check
 copy_from_user(void *to, const void __user *from, unsigned long size)
 {
-	int sz = __compiletime_object_size(to);
-	unsigned long ret = size;
+	unsigned long ret = ___copy_from_user(to, from, size);
 
-	if (likely(sz == -1 || sz >= size)) {
-		ret = ___copy_from_user(to, from, size);
-		if (unlikely(ret))
-			ret = copy_from_user_fixup(to, from, size);
-	} else {
-		copy_from_user_overflow();
-	}
+	if (unlikely(ret))
+		ret = copy_from_user_fixup(to, from, size);
+
 	return ret;
 }
 #define __copy_from_user copy_from_user
@@ -271,17 +259,16 @@ extern unsigned long __must_check __clear_user(void __user *, unsigned long);
 
 #define clear_user __clear_user
 
-extern long __must_check __strncpy_from_user(char *dest, const char __user *src, long count);
+extern __must_check long strlen_user(const char __user *str);
+extern __must_check long strnlen_user(const char __user *str, long n);
 
-#define strncpy_from_user __strncpy_from_user
+#define __copy_to_user_inatomic __copy_to_user
+#define __copy_from_user_inatomic __copy_from_user
 
-extern long __strlen_user(const char __user *);
-extern long __strnlen_user(const char __user *, long len);
-
-#define strlen_user __strlen_user
-#define strnlen_user __strnlen_user
-#define __copy_to_user_inatomic ___copy_to_user
-#define __copy_from_user_inatomic ___copy_from_user
+struct pt_regs;
+extern unsigned long compute_effective_address(struct pt_regs *,
+					       unsigned int insn,
+					       unsigned int rd);
 
 #endif  /* __ASSEMBLY__ */
 

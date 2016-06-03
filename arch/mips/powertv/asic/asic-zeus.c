@@ -17,10 +17,10 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
  *
- * Author:       Ken Eppinett
- *               David Schleef <ds@schleef.org>
+ * Author:	 Ken Eppinett
+ *		 David Schleef <ds@schleef.org>
  *
- * Description:  Defines the platform resources for the SA settop.
+ * Description:	 Defines the platform resources for the SA settop.
  */
 
 #include <linux/init.h>
@@ -28,7 +28,7 @@
 
 #define ZEUS_ADDR(x)	(ZEUS_IO_BASE + (x))
 
-const struct register_map zeus_register_map __initdata = {
+const struct register_map zeus_register_map __initconst = {
 	.eic_slow0_strt_add = {.phys = ZEUS_ADDR(0x000000)},
 	.eic_cfg_bits = {.phys = ZEUS_ADDR(0x000038)},
 	.eic_ready_status = {.phys = ZEUS_ADDR(0x00004c)},
@@ -77,7 +77,7 @@ const struct register_map zeus_register_map __initdata = {
 	.int_docsis_en = {.phys = ZEUS_ADDR(0x2828F4)},
 
 	.mips_pll_setup = {.phys = ZEUS_ADDR(0x1a0000)},
-	.usb_fs = {.phys = ZEUS_ADDR(0x1a0018)},
+	.fs432x4b4_usb_ctl = {.phys = ZEUS_ADDR(0x1a0018)},
 	.test_bus = {.phys = ZEUS_ADDR(0x1a0238)},
 	.crt_spare = {.phys = ZEUS_ADDR(0x1a0090)},
 	.usb2_ohci_int_mask = {.phys = ZEUS_ADDR(0x1e000c)},

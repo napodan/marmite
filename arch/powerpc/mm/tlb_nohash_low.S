@@ -189,6 +189,7 @@ END_MMU_FTR_SECTION_IFSET(MMU_FTR_TYPE_47x)
 	blr
 
 #ifdef CONFIG_PPC_47x
+
 /*
  * _tlbivax_bcast is only on 47x. We don't bother doing a runtime
  * check though, it will blow up soon enough if we mistakenly try
@@ -200,12 +201,40 @@ _GLOBAL(_tlbivax_bcast)
 	rlwimi	r5,r4,0,16,31
 	wrteei	0
 	mtspr	SPRN_MMUCR,r5
-/*	tlbivax	0,r3 - use .long to avoid binutils deps */
-	.long 0x7c000624 | (r3 << 11)
+	isync
+	PPC_TLBIVAX(0, R3)
 	isync
 	eieio
 	tlbsync
+BEGIN_FTR_SECTION
+	b	1f
+END_FTR_SECTION_IFSET(CPU_FTR_476_DD2)
 	sync
+	wrtee	r10
+	blr
+/*
+ * DD2 HW could hang if in instruction fetch happens before msync completes.
+ * Touch enough instruction cache lines to ensure cache hits
+ */
+1:	mflr	r9
+	bl	2f
+2:	mflr	r6
+	li	r7,32
+	PPC_ICBT(0,R6,R7)		/* touch next cache line */
+	add	r6,r6,r7
+	PPC_ICBT(0,R6,R7)		/* touch next cache line */
+	add	r6,r6,r7
+	PPC_ICBT(0,R6,R7)		/* touch next cache line */
+	sync
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+	mtlr	r9
 	wrtee	r10
 	blr
 #endif /* CONFIG_PPC_47x */
@@ -230,7 +259,7 @@ BEGIN_MMU_FTR_SECTION
 	andi.	r3,r3,MMUCSR0_TLBFI@l
 	bne	1b
 MMU_FTR_SECTION_ELSE
-	PPC_TLBILX_ALL(0,0)
+	PPC_TLBILX_ALL(0,R0)
 ALT_MMU_FTR_SECTION_END_IFCLR(MMU_FTR_USE_TLBILX)
 	msync
 	isync
@@ -243,7 +272,7 @@ BEGIN_MMU_FTR_SECTION
 	wrteei	0
 	mfspr	r4,SPRN_MAS6	/* save MAS6 */
 	mtspr	SPRN_MAS6,r3
-	PPC_TLBILX_PID(0,0)
+	PPC_TLBILX_PID(0,R0)
 	mtspr	SPRN_MAS6,r4	/* restore MAS6 */
 	wrtee	r10
 MMU_FTR_SECTION_ELSE
@@ -277,7 +306,7 @@ BEGIN_MMU_FTR_SECTION
 	mtspr	SPRN_MAS1,r4
 	tlbwe
 MMU_FTR_SECTION_ELSE
-	PPC_TLBILX_VA(0,r3)
+	PPC_TLBILX_VA(0,R3)
 ALT_MMU_FTR_SECTION_END_IFCLR(MMU_FTR_USE_TLBILX)
 	msync
 	isync
@@ -295,7 +324,7 @@ _GLOBAL(_tlbil_pid)
 	mfmsr	r10
 	wrteei	0
 	mtspr	SPRN_MAS6,r4
-	PPC_TLBILX_PID(0,0)
+	PPC_TLBILX_PID(0,R0)
 	wrtee	r10
 	msync
 	isync
@@ -307,14 +336,14 @@ _GLOBAL(_tlbil_pid_noind)
 	ori	r4,r4,MAS6_SIND
 	wrteei	0
 	mtspr	SPRN_MAS6,r4
-	PPC_TLBILX_PID(0,0)
+	PPC_TLBILX_PID(0,R0)
 	wrtee	r10
 	msync
 	isync
 	blr
 
 _GLOBAL(_tlbil_all)
-	PPC_TLBILX_ALL(0,0)
+	PPC_TLBILX_ALL(0,R0)
 	msync
 	isync
 	blr
@@ -328,7 +357,7 @@ _GLOBAL(_tlbil_va)
 	beq	1f
 	rlwimi	r4,r6,MAS6_SIND_SHIFT,MAS6_SIND
 1:	mtspr	SPRN_MAS6,r4		/* assume AS=0 for now */
-	PPC_TLBILX_VA(0,r3)
+	PPC_TLBILX_VA(0,R3)
 	msync
 	isync
 	wrtee	r10
@@ -343,7 +372,7 @@ _GLOBAL(_tlbivax_bcast)
 	beq	1f
 	rlwimi	r4,r6,MAS6_SIND_SHIFT,MAS6_SIND
 1:	mtspr	SPRN_MAS6,r4		/* assume AS=0 for now */
-	PPC_TLBIVAX(0,r3)
+	PPC_TLBIVAX(0,R3)
 	eieio
 	tlbsync
 	sync
@@ -366,7 +395,7 @@ _GLOBAL(set_context)
 #error Unsupported processor type !
 #endif
 
-#if defined(CONFIG_FSL_BOOKE)
+#if defined(CONFIG_PPC_FSL_BOOK3E)
 /*
  * extern void loadcam_entry(unsigned int index)
  *

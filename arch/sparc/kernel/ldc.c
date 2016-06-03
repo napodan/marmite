@@ -4,7 +4,7 @@
  */
 
 #include <linux/kernel.h>
-#include <linux/module.h>
+#include <linux/export.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/delay.h>
@@ -27,7 +27,7 @@
 #define DRV_MODULE_VERSION	"1.1"
 #define DRV_MODULE_RELDATE	"July 22, 2008"
 
-static char version[] __devinitdata =
+static char version[] =
 	DRV_MODULE_NAME ".c:v" DRV_MODULE_VERSION " (" DRV_MODULE_RELDATE ")\n";
 #define LDC_PACKET_SIZE		64
 
@@ -790,16 +790,20 @@ static void send_events(struct ldc_channel *lp, unsigned int event_mask)
 static irqreturn_t ldc_rx(int irq, void *dev_id)
 {
 	struct ldc_channel *lp = dev_id;
-	unsigned long orig_state, hv_err, flags;
+	unsigned long orig_state, flags;
 	unsigned int event_mask;
 
 	spin_lock_irqsave(&lp->lock, flags);
 
 	orig_state = lp->chan_state;
-	hv_err = sun4v_ldc_rx_get_state(lp->id,
-					&lp->rx_head,
-					&lp->rx_tail,
-					&lp->chan_state);
+
+	/* We should probably check for hypervisor errors here and
+	 * reset the LDC channel if we get one.
+	 */
+	sun4v_ldc_rx_get_state(lp->id,
+			       &lp->rx_head,
+			       &lp->rx_tail,
+			       &lp->chan_state);
 
 	ldcdbg(RX, "RX state[0x%02lx:0x%02lx] head[0x%04lx] tail[0x%04lx]\n",
 	       orig_state, lp->chan_state, lp->rx_head, lp->rx_tail);
@@ -904,16 +908,20 @@ out:
 static irqreturn_t ldc_tx(int irq, void *dev_id)
 {
 	struct ldc_channel *lp = dev_id;
-	unsigned long flags, hv_err, orig_state;
+	unsigned long flags, orig_state;
 	unsigned int event_mask = 0;
 
 	spin_lock_irqsave(&lp->lock, flags);
 
 	orig_state = lp->chan_state;
-	hv_err = sun4v_ldc_tx_get_state(lp->id,
-					&lp->tx_head,
-					&lp->tx_tail,
-					&lp->chan_state);
+
+	/* We should probably check for hypervisor errors here and
+	 * reset the LDC channel if we get one.
+	 */
+	sun4v_ldc_tx_get_state(lp->id,
+			       &lp->tx_head,
+			       &lp->tx_tail,
+			       &lp->chan_state);
 
 	ldcdbg(TX, " TX state[0x%02lx:0x%02lx] head[0x%04lx] tail[0x%04lx]\n",
 	       orig_state, lp->chan_state, lp->tx_head, lp->tx_tail);
@@ -945,9 +953,8 @@ static HLIST_HEAD(ldc_channel_list);
 static int __ldc_channel_exists(unsigned long id)
 {
 	struct ldc_channel *lp;
-	struct hlist_node *n;
 
-	hlist_for_each_entry(lp, n, &ldc_channel_list, list) {
+	hlist_for_each_entry(lp, &ldc_channel_list, list) {
 		if (lp->id == id)
 			return 1;
 	}
@@ -1242,14 +1249,12 @@ int ldc_bind(struct ldc_channel *lp, const char *name)
 	snprintf(lp->rx_irq_name, LDC_IRQ_NAME_MAX, "%s RX", name);
 	snprintf(lp->tx_irq_name, LDC_IRQ_NAME_MAX, "%s TX", name);
 
-	err = request_irq(lp->cfg.rx_irq, ldc_rx,
-			  IRQF_SAMPLE_RANDOM | IRQF_DISABLED,
+	err = request_irq(lp->cfg.rx_irq, ldc_rx, IRQF_DISABLED,
 			  lp->rx_irq_name, lp);
 	if (err)
 		return err;
 
-	err = request_irq(lp->cfg.tx_irq, ldc_tx,
-			  IRQF_SAMPLE_RANDOM | IRQF_DISABLED,
+	err = request_irq(lp->cfg.tx_irq, ldc_tx, IRQF_DISABLED,
 			  lp->tx_irq_name, lp);
 	if (err) {
 		free_irq(lp->cfg.rx_irq, lp);
@@ -1331,7 +1336,7 @@ int ldc_connect(struct ldc_channel *lp)
 	if (!(lp->flags & LDC_FLAG_ALLOCED_QUEUES) ||
 	    !(lp->flags & LDC_FLAG_REGISTERED_QUEUES) ||
 	    lp->hs_state != LDC_HS_OPEN)
-		err = -EINVAL;
+		err = ((lp->hs_state > LDC_HS_OPEN) ? 0 : -EINVAL);
 	else
 		err = start_handshake(lp);
 
@@ -2301,7 +2306,7 @@ void *ldc_alloc_exp_dring(struct ldc_channel *lp, unsigned int len,
 	if (len & (8UL - 1))
 		return ERR_PTR(-EINVAL);
 
-	buf = kzalloc(len, GFP_KERNEL);
+	buf = kzalloc(len, GFP_ATOMIC);
 	if (!buf)
 		return ERR_PTR(-ENOMEM);
 

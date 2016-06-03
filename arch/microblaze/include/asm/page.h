@@ -23,28 +23,29 @@
 #ifdef __KERNEL__
 
 /* PAGE_SHIFT determines the page size */
-#define PAGE_SHIFT	(12)
-#define PAGE_SIZE	(_AC(1, UL) << PAGE_SHIFT)
+#if defined(CONFIG_MICROBLAZE_64K_PAGES)
+#define PAGE_SHIFT		16
+#elif defined(CONFIG_MICROBLAZE_16K_PAGES)
+#define PAGE_SHIFT		14
+#else
+#define PAGE_SHIFT		12
+#endif
+#define PAGE_SIZE	(ASM_CONST(1) << PAGE_SHIFT)
 #define PAGE_MASK	(~(PAGE_SIZE-1))
 
 #define LOAD_OFFSET	ASM_CONST((CONFIG_KERNEL_START-CONFIG_KERNEL_BASE_ADDR))
 
+#define PTE_SHIFT	(PAGE_SHIFT - 2)	/* 1024 ptes per page */
+
 #ifndef __ASSEMBLY__
 
 /* MS be sure that SLAB allocates aligned objects */
-#define ARCH_KMALLOC_MINALIGN	L1_CACHE_BYTES
+#define ARCH_DMA_MINALIGN	L1_CACHE_BYTES
 
 #define ARCH_SLAB_MINALIGN	L1_CACHE_BYTES
 
 #define PAGE_UP(addr)	(((addr)+((PAGE_SIZE)-1))&(~((PAGE_SIZE)-1)))
 #define PAGE_DOWN(addr)	((addr)&(~((PAGE_SIZE)-1)))
-
-/* align addr on a size boundary - adjust address up/down if needed */
-#define _ALIGN_UP(addr, size)	(((addr)+((size)-1))&(~((size)-1)))
-#define _ALIGN_DOWN(addr, size)	((addr)&(~((size)-1)))
-
-/* align addr on a size boundary - adjust address up if needed */
-#define _ALIGN(addr, size)	_ALIGN_UP(addr, size)
 
 #ifndef CONFIG_MMU
 /*
@@ -70,7 +71,6 @@ extern unsigned int __page_offset;
  * The basic type of a PTE - 32 bit physical addressing.
  */
 typedef unsigned long pte_basic_t;
-#define PTE_SHIFT	(PAGE_SHIFT - 2)	/* 1024 ptes per page */
 #define PTE_FMT		"%.8lx"
 
 #endif /* CONFIG_MMU */
@@ -134,8 +134,10 @@ extern unsigned long min_low_pfn;
 extern unsigned long max_pfn;
 
 extern unsigned long memory_start;
-extern unsigned long memory_end;
 extern unsigned long memory_size;
+extern unsigned long lowmem_size;
+
+extern unsigned long kernel_tlb;
 
 extern int page_is_ram(unsigned long pfn);
 
@@ -173,15 +175,8 @@ extern int page_is_ram(unsigned long pfn);
 
 #define	virt_addr_valid(vaddr)	(pfn_valid(virt_to_pfn(vaddr)))
 
-
-#  ifndef CONFIG_MMU
-#  define __pa(vaddr)	((unsigned long) (vaddr))
-#  define __va(paddr)	((void *) (paddr))
-#  else /* CONFIG_MMU */
-#  define __pa(x)	__virt_to_phys((unsigned long)(x))
-#  define __va(x)	((void *)__phys_to_virt((unsigned long)(x)))
-#  endif /* CONFIG_MMU */
-
+# define __pa(x)	__virt_to_phys((unsigned long)(x))
+# define __va(x)	((void *)__phys_to_virt((unsigned long)(x)))
 
 /* Convert between virtual and physical address for MMU. */
 /* Handle MicroBlaze processor with virtual memory. */
@@ -204,9 +199,6 @@ extern int page_is_ram(unsigned long pfn);
 #define TOPHYS(addr)  __virt_to_phys(addr)
 
 #ifdef CONFIG_MMU
-#ifdef CONFIG_CONTIGUOUS_PAGE_ALLOC
-#define WANT_PAGE_VIRTUAL 1 /* page alloc 2 relies on this */
-#endif
 
 #define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | VM_EXEC | \
 				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)

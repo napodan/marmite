@@ -19,6 +19,7 @@
 #include <linux/interrupt.h>
 #include <linux/percpu.h>
 #include <linux/smp.h>
+#include <linux/irq.h>
 
 #include <asm/addrspace.h>
 #include <asm/io.h>
@@ -40,7 +41,7 @@
  * the rest of the system
  */
 static void sibyte_set_mode(enum clock_event_mode mode,
-                           struct clock_event_device *evt)
+			   struct clock_event_device *evt)
 {
 	unsigned int cpu = smp_processor_id();
 	void __iomem *cfg, *init;
@@ -143,8 +144,8 @@ void __cpuinit sb1480_clockevent_init(void)
 
 	bcm1480_unmask_irq(cpu, irq);
 
-	action->handler	= sibyte_counter_handler;
-	action->flags	= IRQF_DISABLED | IRQF_PERCPU | IRQF_TIMER;
+	action->handler = sibyte_counter_handler;
+	action->flags	= IRQF_PERCPU | IRQF_TIMER;
 	action->name	= name;
 	action->dev_id	= cd;
 

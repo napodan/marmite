@@ -9,9 +9,9 @@
  *
  * Reference: AMD Geode(TM) CS5536 Companion Device Data Book
  *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
+ *  This program is free software; you can redistribute	 it and/or modify it
+ *  under  the terms of	 the GNU General  Public License as published by the
+ *  Free Software Foundation;  either version 2 of the	License, or (at your
  *  option) any later version.
  */
 
@@ -111,7 +111,7 @@ static irqreturn_t timer_interrupt(int irq, void *dev_id)
 
 static struct irqaction irq5 = {
 	.handler = timer_interrupt,
-	.flags = IRQF_DISABLED | IRQF_NOBALANCING | IRQF_TIMER,
+	.flags = IRQF_NOBALANCING | IRQF_TIMER,
 	.name = "timer"
 };
 
@@ -201,8 +201,6 @@ static struct clocksource clocksource_mfgpt = {
 	.rating = 120, /* Functional for real use, but not desired */
 	.read = mfgpt_read,
 	.mask = CLOCKSOURCE_MASK(32),
-	.mult = 0,
-	.shift = 22,
 };
 
 int __init init_mfgpt_clocksource(void)
@@ -210,8 +208,7 @@ int __init init_mfgpt_clocksource(void)
 	if (num_possible_cpus() > 1)	/* MFGPT does not scale! */
 		return 0;
 
-	clocksource_mfgpt.mult = clocksource_hz2mult(MFGPT_TICK_RATE, 22);
-	return clocksource_register(&clocksource_mfgpt);
+	return clocksource_register_hz(&clocksource_mfgpt, MFGPT_TICK_RATE);
 }
 
 arch_initcall(init_mfgpt_clocksource);

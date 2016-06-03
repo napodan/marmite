@@ -27,7 +27,6 @@
 #include <asm/errno.h>
 #include <asm/irq_regs.h>
 #include <asm/signal.h>
-#include <asm/system.h>
 #include <asm/io.h>
 
 #include <asm/sibyte/bcm1480_regs.h>
@@ -44,30 +43,9 @@
  * for interrupt lines
  */
 
-
-static void end_bcm1480_irq(unsigned int irq);
-static void enable_bcm1480_irq(unsigned int irq);
-static void disable_bcm1480_irq(unsigned int irq);
-static void ack_bcm1480_irq(unsigned int irq);
-#ifdef CONFIG_SMP
-static int bcm1480_set_affinity(unsigned int irq, const struct cpumask *mask);
-#endif
-
 #ifdef CONFIG_PCI
 extern unsigned long ht_eoi_space;
 #endif
-
-static struct irq_chip bcm1480_irq_type = {
-	.name = "BCM1480-IMR",
-	.ack = ack_bcm1480_irq,
-	.mask = disable_bcm1480_irq,
-	.mask_ack = ack_bcm1480_irq,
-	.unmask = enable_bcm1480_irq,
-	.end = end_bcm1480_irq,
-#ifdef CONFIG_SMP
-	.set_affinity = bcm1480_set_affinity
-#endif
-};
 
 /* Store the CPU id (not the logical number) */
 int bcm1480_irq_owner[BCM1480_NR_IRQS];
@@ -109,12 +87,13 @@ void bcm1480_unmask_irq(int cpu, int irq)
 }
 
 #ifdef CONFIG_SMP
-static int bcm1480_set_affinity(unsigned int irq, const struct cpumask *mask)
+static int bcm1480_set_affinity(struct irq_data *d, const struct cpumask *mask,
+				bool force)
 {
+	unsigned int irq_dirty, irq = d->irq;
 	int i = 0, old_cpu, cpu, int_on, k;
 	u64 cur_ints;
 	unsigned long flags;
-	unsigned int irq_dirty;
 
 	i = cpumask_first(mask);
 
@@ -156,21 +135,25 @@ static int bcm1480_set_affinity(unsigned int irq, const struct cpumask *mask)
 
 /*****************************************************************************/
 
-static void disable_bcm1480_irq(unsigned int irq)
+static void disable_bcm1480_irq(struct irq_data *d)
 {
+	unsigned int irq = d->irq;
+
 	bcm1480_mask_irq(bcm1480_irq_owner[irq], irq);
 }
 
-static void enable_bcm1480_irq(unsigned int irq)
+static void enable_bcm1480_irq(struct irq_data *d)
 {
+	unsigned int irq = d->irq;
+
 	bcm1480_unmask_irq(bcm1480_irq_owner[irq], irq);
 }
 
 
-static void ack_bcm1480_irq(unsigned int irq)
+static void ack_bcm1480_irq(struct irq_data *d)
 {
+	unsigned int irq_dirty, irq = d->irq;
 	u64 pending;
-	unsigned int irq_dirty;
 	int k;
 
 	/*
@@ -217,21 +200,23 @@ static void ack_bcm1480_irq(unsigned int irq)
 	bcm1480_mask_irq(bcm1480_irq_owner[irq], irq);
 }
 
-
-static void end_bcm1480_irq(unsigned int irq)
-{
-	if (!(irq_desc[irq].status & (IRQ_DISABLED | IRQ_INPROGRESS))) {
-		bcm1480_unmask_irq(bcm1480_irq_owner[irq], irq);
-	}
-}
-
+static struct irq_chip bcm1480_irq_type = {
+	.name = "BCM1480-IMR",
+	.irq_mask_ack = ack_bcm1480_irq,
+	.irq_mask = disable_bcm1480_irq,
+	.irq_unmask = enable_bcm1480_irq,
+#ifdef CONFIG_SMP
+	.irq_set_affinity = bcm1480_set_affinity
+#endif
+};
 
 void __init init_bcm1480_irqs(void)
 {
 	int i;
 
 	for (i = 0; i < BCM1480_NR_IRQS; i++) {
-		set_irq_chip_and_handler(i, &bcm1480_irq_type, handle_level_irq);
+		irq_set_chip_and_handler(i, &bcm1480_irq_type,
+					 handle_level_irq);
 		bcm1480_irq_owner[i] = 0;
 	}
 }
@@ -298,10 +283,10 @@ void __init arch_init_irq(void)
 	for (cpu = 0; cpu < 4; cpu++) {
 		__raw_writeq(IMR_IP3_VAL, IOADDR(A_BCM1480_IMR_REGISTER(cpu, R_BCM1480_IMR_INTERRUPT_MAP_BASE_H) +
 						 (K_BCM1480_INT_MBOX_0_0 << 3)));
-        }
+	}
 
 
-	/* Clear the mailboxes.  The firmware may leave them dirty */
+	/* Clear the mailboxes.	 The firmware may leave them dirty */
 	for (cpu = 0; cpu < 4; cpu++) {
 		__raw_writeq(0xffffffffffffffffULL,
 			     IOADDR(A_BCM1480_IMR_REGISTER(cpu, R_BCM1480_IMR_MAILBOX_0_CLR_CPU)));
@@ -322,7 +307,7 @@ void __init arch_init_irq(void)
 
 	/*
 	 * Note that the timer interrupts are also mapped, but this is
-	 * done in bcm1480_time_init().  Also, the profiling driver
+	 * done in bcm1480_time_init().	 Also, the profiling driver
 	 * does its own management of IP7.
 	 */
 
@@ -340,7 +325,7 @@ static inline void dispatch_ip2(void)
 
 	/*
 	 * Default...we've hit an IP[2] interrupt, which means we've got to
-	 * check the 1480 interrupt registers to figure out what to do.  Need
+	 * check the 1480 interrupt registers to figure out what to do.	 Need
 	 * to detect which CPU we're on, now that smp_affinity is supported.
 	 */
 	base = A_BCM1480_IMR_MAPPER(cpu);

@@ -3,6 +3,8 @@
  */
 void cm_control(u32, u32);
 
+#define CM_CTRL	__io_address(INTEGRATOR_HDR_CTRL)
+
 #define CM_CTRL_LED			(1 << 0)
 #define CM_CTRL_nMBDET			(1 << 1)
 #define CM_CTRL_REMAP			(1 << 2)
@@ -24,9 +26,9 @@ void cm_control(u32, u32);
 #define CM_CTRL_LCDBIASDN		(1 << 10)
 #define CM_CTRL_LCDMUXSEL_MASK		(7 << 11)
 #define CM_CTRL_LCDMUXSEL_GENLCD	(1 << 11)
-#define CM_CTRL_LCDMUXSEL_VGA_16BPP	(2 << 11)
+#define CM_CTRL_LCDMUXSEL_VGA565_TFT555	(2 << 11)
 #define CM_CTRL_LCDMUXSEL_SHARPLCD	(3 << 11)
-#define CM_CTRL_LCDMUXSEL_VGA_8421BPP	(4 << 11)
+#define CM_CTRL_LCDMUXSEL_VGA555_TFT555	(4 << 11)
 #define CM_CTRL_LCDEN0			(1 << 14)
 #define CM_CTRL_LCDEN1			(1 << 15)
 #define CM_CTRL_STATIC1			(1 << 16)

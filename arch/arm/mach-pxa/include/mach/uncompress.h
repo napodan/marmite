@@ -16,9 +16,9 @@
 #define BTUART_BASE	(0x40200000)
 #define STUART_BASE	(0x40700000)
 
-static unsigned long uart_base;
-static unsigned int uart_shift;
-static unsigned int uart_is_pxa;
+unsigned long uart_base;
+unsigned int uart_shift;
+unsigned int uart_is_pxa;
 
 static inline unsigned char uart_read(int offset)
 {
@@ -72,8 +72,3 @@ static inline void arch_decomp_setup(void)
 		uart_is_pxa = 0;
 	}
 }
-
-/*
- * nothing to do
- */
-#define arch_decomp_wdog()

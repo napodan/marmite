@@ -88,15 +88,16 @@ struct pci_pbm_info {
 	int				chip_revision;
 
 	/* Name used for top-level resources. */
-	char				*name;
+	const char			*name;
 
 	/* OBP specific information. */
-	struct of_device		*op;
+	struct platform_device		*op;
 	u64				ino_bitmap;
 
 	/* PBM I/O and Memory space resources. */
 	struct resource			io_space;
 	struct resource			mem_space;
+	struct resource			busn;
 
 	/* Base of PCI Config space, can be per-PBM or shared. */
 	unsigned long			config_space;
@@ -131,9 +132,9 @@ struct pci_pbm_info {
 	void				*msi_queues;
 	unsigned long			*msi_bitmap;
 	unsigned int			*msi_irq_table;
-	int (*setup_msi_irq)(unsigned int *virt_irq_p, struct pci_dev *pdev,
+	int (*setup_msi_irq)(unsigned int *irq_p, struct pci_dev *pdev,
 			     struct msi_desc *entry);
-	void (*teardown_msi_irq)(unsigned int virt_irq, struct pci_dev *pdev);
+	void (*teardown_msi_irq)(unsigned int irq, struct pci_dev *pdev);
 	const struct sparc64_msiq_ops	*msi_ops;
 #endif /* !(CONFIG_PCI_MSI) */
 

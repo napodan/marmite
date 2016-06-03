@@ -14,20 +14,26 @@
 #include <linux/device.h>
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
-#include <linux/mfd/sh_mobile_sdhi.h>
+#include <linux/mmc/host.h>
+#include <linux/mmc/sh_mobile_sdhi.h>
 #include <linux/mtd/physmap.h>
 #include <linux/delay.h>
+#include <linux/regulator/fixed.h>
+#include <linux/regulator/machine.h>
 #include <linux/smc91x.h>
 #include <linux/gpio.h>
 #include <linux/input.h>
 #include <linux/input/sh_keysc.h>
 #include <linux/usb/r8a66597.h>
+#include <linux/sh_eth.h>
+#include <linux/sh_intc.h>
+#include <linux/videodev2.h>
 #include <video/sh_mobile_lcdc.h>
 #include <media/sh_mobile_ceu.h>
 #include <sound/sh_fsi.h>
+#include <sound/simple_card.h>
 #include <asm/io.h>
 #include <asm/heartbeat.h>
-#include <asm/sh_eth.h>
 #include <asm/clock.h>
 #include <asm/suspend.h>
 #include <cpu/sh7724.h>
@@ -144,21 +150,45 @@ static struct platform_device nor_flash_device = {
 };
 
 /* LCDC */
+static const struct fb_videomode lcdc_720p_modes[] = {
+	{
+		.name		= "LB070WV1",
+		.sync		= 0, /* hsync and vsync are active low */
+		.xres		= 1280,
+		.yres		= 720,
+		.left_margin	= 220,
+		.right_margin	= 110,
+		.hsync_len	= 40,
+		.upper_margin	= 20,
+		.lower_margin	= 5,
+		.vsync_len	= 5,
+	},
+};
+
+static const struct fb_videomode lcdc_vga_modes[] = {
+	{
+		.name		= "LB070WV1",
+		.sync		= 0, /* hsync and vsync are active low */
+		.xres		= 640,
+		.yres		= 480,
+		.left_margin	= 105,
+		.right_margin	= 50,
+		.hsync_len	= 96,
+		.upper_margin	= 33,
+		.lower_margin	= 10,
+		.vsync_len	= 2,
+	},
+};
+
 static struct sh_mobile_lcdc_info lcdc_info = {
 	.clock_source = LCDC_CLK_EXTERNAL,
 	.ch[0] = {
 		.chan = LCDC_CHAN_MAINLCD,
-		.bpp = 16,
+		.fourcc = V4L2_PIX_FMT_RGB565,
 		.clock_divider = 1,
-		.lcd_cfg = {
-			.name = "LB070WV1",
-			.sync = 0, /* hsync and vsync are active low */
-		},
-		.lcd_size_cfg = { /* 7.0 inch */
+		.panel_cfg = { /* 7.0 inch */
 			.width = 152,
 			.height = 91,
-		},
-		.board_cfg = {
 		},
 	}
 };
@@ -171,7 +201,7 @@ static struct resource lcdc_resources[] = {
 		.flags	= IORESOURCE_MEM,
 	},
 	[1] = {
-		.start	= 106,
+		.start	= evt2irq(0xf40),
 		.flags	= IORESOURCE_IRQ,
 	},
 };
@@ -182,9 +212,6 @@ static struct platform_device lcdc_device = {
 	.resource	= lcdc_resources,
 	.dev		= {
 		.platform_data	= &lcdc_info,
-	},
-	.archdata = {
-		.hwblk_id = HWBLK_LCDC,
 	},
 };
 
@@ -201,7 +228,7 @@ static struct resource ceu0_resources[] = {
 		.flags	= IORESOURCE_MEM,
 	},
 	[1] = {
-		.start  = 52,
+		.start  = evt2irq(0x880),
 		.flags  = IORESOURCE_IRQ,
 	},
 	[2] = {
@@ -216,9 +243,6 @@ static struct platform_device ceu0_device = {
 	.resource	= ceu0_resources,
 	.dev	= {
 		.platform_data	= &sh_mobile_ceu0_info,
-	},
-	.archdata = {
-		.hwblk_id = HWBLK_CEU0,
 	},
 };
 
@@ -235,7 +259,7 @@ static struct resource ceu1_resources[] = {
 		.flags	= IORESOURCE_MEM,
 	},
 	[1] = {
-		.start  = 63,
+		.start  = evt2irq(0x9e0),
 		.flags  = IORESOURCE_IRQ,
 	},
 	[2] = {
@@ -251,46 +275,10 @@ static struct platform_device ceu1_device = {
 	.dev	= {
 		.platform_data	= &sh_mobile_ceu1_info,
 	},
-	.archdata = {
-		.hwblk_id = HWBLK_CEU1,
-	},
 };
 
 /* FSI */
-/*
- * FSI-A use external clock which came from ak464x.
- * So, we should change parent of fsi
- */
-#define FCLKACR		0xa4150008
-static void fsimck_init(struct clk *clk)
-{
-	u32 status = __raw_readl(clk->enable_reg);
-
-	/* use external clock */
-	status &= ~0x000000ff;
-	status |= 0x00000080;
-	__raw_writel(status, clk->enable_reg);
-}
-
-static struct clk_ops fsimck_clk_ops = {
-	.init = fsimck_init,
-};
-
-static struct clk fsimcka_clk = {
-	.ops		= &fsimck_clk_ops,
-	.enable_reg	= (void __iomem *)FCLKACR,
-	.rate		= 0, /* unknown */
-};
-
 /* change J20, J21, J22 pin to 1-2 connection to use slave mode */
-static struct sh_fsi_platform_info fsi_info = {
-	.porta_flags = SH_FSI_BRS_INV |
-		       SH_FSI_OUT_SLAVE_MODE |
-		       SH_FSI_IN_SLAVE_MODE |
-		       SH_FSI_OFMT(PCM) |
-		       SH_FSI_IFMT(PCM),
-};
-
 static struct resource fsi_resources[] = {
 	[0] = {
 		.name	= "FSI",
@@ -299,7 +287,7 @@ static struct resource fsi_resources[] = {
 		.flags	= IORESOURCE_MEM,
 	},
 	[1] = {
-		.start  = 108,
+		.start  = evt2irq(0xf80),
 		.flags  = IORESOURCE_IRQ,
 	},
 };
@@ -309,11 +297,29 @@ static struct platform_device fsi_device = {
 	.id		= 0,
 	.num_resources	= ARRAY_SIZE(fsi_resources),
 	.resource	= fsi_resources,
-	.dev	= {
-		.platform_data	= &fsi_info,
+};
+
+static struct asoc_simple_card_info fsi_ak4642_info = {
+	.name		= "AK4642",
+	.card		= "FSIA-AK4642",
+	.codec		= "ak4642-codec.0-0012",
+	.platform	= "sh_fsi.0",
+	.daifmt		= SND_SOC_DAIFMT_LEFT_J,
+	.cpu_dai = {
+		.name	= "fsia-dai",
+		.fmt	= SND_SOC_DAIFMT_CBS_CFS | SND_SOC_DAIFMT_IB_NF,
 	},
-	.archdata = {
-		.hwblk_id = HWBLK_SPU, /* FSI needs SPU hwblk */
+	.codec_dai = {
+		.name	= "ak4642-hifi",
+		.fmt	= SND_SOC_DAIFMT_CBM_CFM,
+		.sysclk	= 11289600,
+	},
+};
+
+static struct platform_device fsi_ak4642_device = {
+	.name	= "asoc-simple-card",
+	.dev	= {
+		.platform_data	= &fsi_ak4642_info,
 	},
 };
 
@@ -340,7 +346,7 @@ static struct resource keysc_resources[] = {
 		.flags  = IORESOURCE_MEM,
 	},
 	[1] = {
-		.start  = 79,
+		.start  = evt2irq(0xbe0),
 		.flags  = IORESOURCE_IRQ,
 	},
 };
@@ -353,9 +359,6 @@ static struct platform_device keysc_device = {
 	.dev	= {
 		.platform_data	= &keysc_info,
 	},
-	.archdata = {
-		.hwblk_id = HWBLK_KEYSC,
-	},
 };
 
 /* SH Eth */
@@ -366,7 +369,7 @@ static struct resource sh_eth_resources[] = {
 		.flags = IORESOURCE_MEM,
 	},
 	[1] = {
-		.start = 91,
+		.start = evt2irq(0xd60),
 		.flags = IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHLEVEL,
 	},
 };
@@ -384,9 +387,6 @@ static struct platform_device sh_eth_device = {
 	},
 	.num_resources = ARRAY_SIZE(sh_eth_resources),
 	.resource = sh_eth_resources,
-	.archdata = {
-		.hwblk_id = HWBLK_ETHER,
-	},
 };
 
 static struct r8a66597_platdata sh7724_usb0_host_data = {
@@ -400,8 +400,8 @@ static struct resource sh7724_usb0_host_resources[] = {
 		.flags	= IORESOURCE_MEM,
 	},
 	[1] = {
-		.start	= 65,
-		.end	= 65,
+		.start	= evt2irq(0xa20),
+		.end	= evt2irq(0xa20),
 		.flags	= IORESOURCE_IRQ | IRQF_TRIGGER_LOW,
 	},
 };
@@ -416,9 +416,6 @@ static struct platform_device sh7724_usb0_host_device = {
 	},
 	.num_resources	= ARRAY_SIZE(sh7724_usb0_host_resources),
 	.resource	= sh7724_usb0_host_resources,
-	.archdata = {
-		.hwblk_id = HWBLK_USB0,
-	},
 };
 
 static struct r8a66597_platdata sh7724_usb1_gadget_data = {
@@ -432,8 +429,8 @@ static struct resource sh7724_usb1_gadget_resources[] = {
 		.flags	= IORESOURCE_MEM,
 	},
 	[1] = {
-		.start	= 66,
-		.end	= 66,
+		.start	= evt2irq(0xa40),
+		.end	= evt2irq(0xa40),
 		.flags	= IORESOURCE_IRQ | IRQF_TRIGGER_LOW,
 	},
 };
@@ -450,15 +447,24 @@ static struct platform_device sh7724_usb1_gadget_device = {
 	.resource	= sh7724_usb1_gadget_resources,
 };
 
+/* Fixed 3.3V regulator to be used by SDHI0, SDHI1 */
+static struct regulator_consumer_supply fixed3v3_power_consumers[] =
+{
+	REGULATOR_SUPPLY("vmmc", "sh_mobile_sdhi.0"),
+	REGULATOR_SUPPLY("vqmmc", "sh_mobile_sdhi.0"),
+	REGULATOR_SUPPLY("vmmc", "sh_mobile_sdhi.1"),
+	REGULATOR_SUPPLY("vqmmc", "sh_mobile_sdhi.1"),
+};
+
 static struct resource sdhi0_cn7_resources[] = {
 	[0] = {
 		.name	= "SDHI0",
 		.start  = 0x04ce0000,
-		.end    = 0x04ce01ff,
+		.end    = 0x04ce00ff,
 		.flags  = IORESOURCE_MEM,
 	},
 	[1] = {
-		.start  = 100,
+		.start  = evt2irq(0xe80),
 		.flags  = IORESOURCE_IRQ,
 	},
 };
@@ -466,6 +472,7 @@ static struct resource sdhi0_cn7_resources[] = {
 static struct sh_mobile_sdhi_info sh7724_sdhi0_data = {
 	.dma_slave_tx	= SHDMA_SLAVE_SDHI0_TX,
 	.dma_slave_rx	= SHDMA_SLAVE_SDHI0_RX,
+	.tmio_caps      = MMC_CAP_SDIO_IRQ,
 };
 
 static struct platform_device sdhi0_cn7_device = {
@@ -476,20 +483,17 @@ static struct platform_device sdhi0_cn7_device = {
 	.dev = {
 		.platform_data	= &sh7724_sdhi0_data,
 	},
-	.archdata = {
-		.hwblk_id = HWBLK_SDHI0,
-	},
 };
 
 static struct resource sdhi1_cn8_resources[] = {
 	[0] = {
 		.name	= "SDHI1",
 		.start  = 0x04cf0000,
-		.end    = 0x04cf01ff,
+		.end    = 0x04cf00ff,
 		.flags  = IORESOURCE_MEM,
 	},
 	[1] = {
-		.start  = 23,
+		.start  = evt2irq(0x4e0),
 		.flags  = IORESOURCE_IRQ,
 	},
 };
@@ -497,6 +501,7 @@ static struct resource sdhi1_cn8_resources[] = {
 static struct sh_mobile_sdhi_info sh7724_sdhi1_data = {
 	.dma_slave_tx	= SHDMA_SLAVE_SDHI1_TX,
 	.dma_slave_rx	= SHDMA_SLAVE_SDHI1_RX,
+	.tmio_caps      = MMC_CAP_SDIO_IRQ,
 };
 
 static struct platform_device sdhi1_cn8_device = {
@@ -506,9 +511,6 @@ static struct platform_device sdhi1_cn8_device = {
 	.resource       = sdhi1_cn8_resources,
 	.dev = {
 		.platform_data	= &sh7724_sdhi1_data,
-	},
-	.archdata = {
-		.hwblk_id = HWBLK_SDHI1,
 	},
 };
 
@@ -521,7 +523,7 @@ static struct resource irda_resources[] = {
 		.flags  = IORESOURCE_MEM,
 	},
 	[1] = {
-		.start  = 20,
+		.start  = evt2irq(0x480),
 		.flags  = IORESOURCE_IRQ,
 	},
 };
@@ -550,7 +552,6 @@ static struct sh_vou_pdata sh_vou_pdata = {
 	.flags		= SH_VOU_HSYNC_LOW | SH_VOU_VSYNC_LOW,
 	.board_info	= &ak8813,
 	.i2c_adap	= 0,
-	.module_name	= "ak881x",
 };
 
 static struct resource sh_vou_resources[] = {
@@ -560,7 +561,7 @@ static struct resource sh_vou_resources[] = {
 		.flags  = IORESOURCE_MEM,
 	},
 	[1] = {
-		.start  = 55,
+		.start  = evt2irq(0x8e0),
 		.flags  = IORESOURCE_IRQ,
 	},
 };
@@ -572,9 +573,6 @@ static struct platform_device vou_device = {
 	.resource       = sh_vou_resources,
 	.dev		= {
 		.platform_data	= &sh_vou_pdata,
-	},
-	.archdata	= {
-		.hwblk_id	= HWBLK_VOU,
 	},
 };
 
@@ -590,6 +588,7 @@ static struct platform_device *ms7724se_devices[] __initdata = {
 	&sh7724_usb0_host_device,
 	&sh7724_usb1_gadget_device,
 	&fsi_device,
+	&fsi_ak4642_device,
 	&sdhi0_cn7_device,
 	&sdhi1_cn8_device,
 	&irda_device,
@@ -608,6 +607,7 @@ static struct i2c_board_info i2c0_devices[] = {
 #define EEPROM_DATA 0xBA20600C
 #define EEPROM_STAT 0xBA206010
 #define EEPROM_STRT 0xBA206014
+
 static int __init sh_eth_is_eeprom_ready(void)
 {
 	int t = 10000;
@@ -664,7 +664,6 @@ extern char ms7724se_sdram_enter_end;
 extern char ms7724se_sdram_leave_start;
 extern char ms7724se_sdram_leave_end;
 
-
 static int __init arch_setup(void)
 {
 	/* enable I2C device */
@@ -687,6 +686,10 @@ static int __init devices_setup(void)
 					&ms7724se_sdram_enter_end,
 					&ms7724se_sdram_leave_start,
 					&ms7724se_sdram_leave_end);
+
+	regulator_register_always_on(0, "fixed-3.3V", fixed3v3_power_consumers,
+				     ARRAY_SIZE(fixed3v3_power_consumers), 3300000);
+
 	/* Reset Release */
 	fpga_out = __raw_readw(FPGA_OUT);
 	/* bit4: NTSC_PDN, bit5: NTSC_RESET */
@@ -827,37 +830,29 @@ static int __init devices_setup(void)
 	gpio_request(GPIO_FN_KEYOUT0,     NULL);
 
 	/* enable FSI */
-	gpio_request(GPIO_FN_FSIMCKB,    NULL);
 	gpio_request(GPIO_FN_FSIMCKA,    NULL);
+	gpio_request(GPIO_FN_FSIIASD,    NULL);
 	gpio_request(GPIO_FN_FSIOASD,    NULL);
 	gpio_request(GPIO_FN_FSIIABCK,   NULL);
 	gpio_request(GPIO_FN_FSIIALRCK,  NULL);
 	gpio_request(GPIO_FN_FSIOABCK,   NULL);
 	gpio_request(GPIO_FN_FSIOALRCK,  NULL);
 	gpio_request(GPIO_FN_CLKAUDIOAO, NULL);
-	gpio_request(GPIO_FN_FSIIBSD,    NULL);
-	gpio_request(GPIO_FN_FSIOBSD,    NULL);
-	gpio_request(GPIO_FN_FSIIBBCK,   NULL);
-	gpio_request(GPIO_FN_FSIIBLRCK,  NULL);
-	gpio_request(GPIO_FN_FSIOBBCK,   NULL);
-	gpio_request(GPIO_FN_FSIOBLRCK,  NULL);
-	gpio_request(GPIO_FN_CLKAUDIOBO, NULL);
-	gpio_request(GPIO_FN_FSIIASD,    NULL);
 
 	/* set SPU2 clock to 83.4 MHz */
 	clk = clk_get(NULL, "spu_clk");
-	if (clk) {
+	if (!IS_ERR(clk)) {
 		clk_set_rate(clk, clk_round_rate(clk, 83333333));
 		clk_put(clk);
 	}
 
 	/* change parent of FSI A */
 	clk = clk_get(NULL, "fsia_clk");
-	if (clk) {
-		clk_register(&fsimcka_clk);
-		clk_set_parent(clk, &fsimcka_clk);
-		clk_set_rate(clk, 11000);
-		clk_set_rate(&fsimcka_clk, 11000);
+	if (!IS_ERR(clk)) {
+		/* 48kHz dummy clock was used to make sure 1/1 divide */
+		clk_set_rate(&sh7724_fsimcka_clk, 48000);
+		clk_set_parent(clk, &sh7724_fsimcka_clk);
+		clk_set_rate(clk, 48000);
 		clk_put(clk);
 	}
 
@@ -909,24 +904,12 @@ static int __init devices_setup(void)
 
 	if (sw & SW41_B) {
 		/* 720p */
-		lcdc_info.ch[0].lcd_cfg.xres         = 1280;
-		lcdc_info.ch[0].lcd_cfg.yres         = 720;
-		lcdc_info.ch[0].lcd_cfg.left_margin  = 220;
-		lcdc_info.ch[0].lcd_cfg.right_margin = 110;
-		lcdc_info.ch[0].lcd_cfg.hsync_len    = 40;
-		lcdc_info.ch[0].lcd_cfg.upper_margin = 20;
-		lcdc_info.ch[0].lcd_cfg.lower_margin = 5;
-		lcdc_info.ch[0].lcd_cfg.vsync_len    = 5;
+		lcdc_info.ch[0].lcd_modes = lcdc_720p_modes;
+		lcdc_info.ch[0].num_modes = ARRAY_SIZE(lcdc_720p_modes);
 	} else {
 		/* VGA */
-		lcdc_info.ch[0].lcd_cfg.xres         = 640;
-		lcdc_info.ch[0].lcd_cfg.yres         = 480;
-		lcdc_info.ch[0].lcd_cfg.left_margin  = 105;
-		lcdc_info.ch[0].lcd_cfg.right_margin = 50;
-		lcdc_info.ch[0].lcd_cfg.hsync_len    = 96;
-		lcdc_info.ch[0].lcd_cfg.upper_margin = 33;
-		lcdc_info.ch[0].lcd_cfg.lower_margin = 10;
-		lcdc_info.ch[0].lcd_cfg.vsync_len    = 2;
+		lcdc_info.ch[0].lcd_modes = lcdc_vga_modes;
+		lcdc_info.ch[0].num_modes = ARRAY_SIZE(lcdc_vga_modes);
 	}
 
 	if (sw & SW41_A) {
@@ -961,5 +944,4 @@ device_initcall(devices_setup);
 static struct sh_machine_vector mv_ms7724se __initmv = {
 	.mv_name	= "ms7724se",
 	.mv_init_irq	= init_se7724_IRQ,
-	.mv_nr_irqs	= SE7724_FPGA_IRQ_BASE + SE7724_FPGA_IRQ_NR,
 };

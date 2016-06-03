@@ -26,16 +26,16 @@ extern pgd_t init_level4_pgt[];
 extern void paging_init(void);
 
 #define pte_ERROR(e)					\
-	printk("%s:%d: bad pte %p(%016lx).\n",		\
+	pr_err("%s:%d: bad pte %p(%016lx)\n",		\
 	       __FILE__, __LINE__, &(e), pte_val(e))
 #define pmd_ERROR(e)					\
-	printk("%s:%d: bad pmd %p(%016lx).\n",		\
+	pr_err("%s:%d: bad pmd %p(%016lx)\n",		\
 	       __FILE__, __LINE__, &(e), pmd_val(e))
 #define pud_ERROR(e)					\
-	printk("%s:%d: bad pud %p(%016lx).\n",		\
+	pr_err("%s:%d: bad pud %p(%016lx)\n",		\
 	       __FILE__, __LINE__, &(e), pud_val(e))
 #define pgd_ERROR(e)					\
-	printk("%s:%d: bad pgd %p(%016lx).\n",		\
+	pr_err("%s:%d: bad pgd %p(%016lx)\n",		\
 	       __FILE__, __LINE__, &(e), pgd_val(e))
 
 struct mm_struct;
@@ -59,6 +59,16 @@ static inline void native_set_pte_atomic(pte_t *ptep, pte_t pte)
 	native_set_pte(ptep, pte);
 }
 
+static inline void native_set_pmd(pmd_t *pmdp, pmd_t pmd)
+{
+	*pmdp = pmd;
+}
+
+static inline void native_pmd_clear(pmd_t *pmd)
+{
+	native_set_pmd(pmd, native_make_pmd(0));
+}
+
 static inline pte_t native_ptep_get_and_clear(pte_t *xp)
 {
 #ifdef CONFIG_SMP
@@ -72,14 +82,17 @@ static inline pte_t native_ptep_get_and_clear(pte_t *xp)
 #endif
 }
 
-static inline void native_set_pmd(pmd_t *pmdp, pmd_t pmd)
+static inline pmd_t native_pmdp_get_and_clear(pmd_t *xp)
 {
-	*pmdp = pmd;
-}
-
-static inline void native_pmd_clear(pmd_t *pmd)
-{
-	native_set_pmd(pmd, native_make_pmd(0));
+#ifdef CONFIG_SMP
+	return native_make_pmd(xchg(&xp->pmd, 0));
+#else
+	/* native_local_pmdp_get_and_clear,
+	   but duplicated because of cyclic dependency */
+	pmd_t ret = *xp;
+	native_pmd_clear(xp);
+	return ret;
+#endif
 }
 
 static inline void native_set_pud(pud_t *pudp, pud_t pud)
@@ -101,6 +114,8 @@ static inline void native_pgd_clear(pgd_t *pgd)
 {
 	native_set_pgd(pgd, native_make_pgd(0));
 }
+
+extern void sync_global_pgds(unsigned long start, unsigned long end);
 
 /*
  * Conversion functions: convert a page and protection to a page entry,
@@ -125,11 +140,7 @@ static inline int pgd_large(pgd_t pgd) { return 0; }
 
 /* x86-64 always has all page tables mapped. */
 #define pte_offset_map(dir, address) pte_offset_kernel((dir), (address))
-#define pte_offset_map_nested(dir, address) pte_offset_kernel((dir), (address))
-#define pte_unmap(pte) /* NOP */
-#define pte_unmap_nested(pte) /* NOP */
-
-#define update_mmu_cache(vma, address, ptep) do { } while (0)
+#define pte_unmap(pte) ((void)(pte))/* NOP */
 
 /* Encode and de-code a swap entry */
 #if _PAGE_BIT_FILE < _PAGE_BIT_PROTNONE
@@ -168,6 +179,12 @@ extern void cleanup_highmap(void);
 #define	kc_offset_to_vaddr(o) ((o) | ~__VIRTUAL_MASK)
 
 #define __HAVE_ARCH_PTE_SAME
+
+#define vmemmap ((struct page *)VMEMMAP_START)
+
+extern void init_extra_mapping_uc(unsigned long phys, unsigned long size);
+extern void init_extra_mapping_wb(unsigned long phys, unsigned long size);
+
 #endif /* !__ASSEMBLY__ */
 
 #endif /* _ASM_X86_PGTABLE_64_H */

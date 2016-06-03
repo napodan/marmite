@@ -86,7 +86,7 @@ static struct shash_alg sha512_alg = {
 	}
 };
 
-MODULE_ALIAS("sha512");
+MODULE_ALIAS_CRYPTO("sha512");
 
 static int sha384_init(struct shash_desc *desc)
 {
@@ -126,13 +126,13 @@ static struct shash_alg sha384_alg = {
 	}
 };
 
-MODULE_ALIAS("sha384");
+MODULE_ALIAS_CRYPTO("sha384");
 
 static int __init init(void)
 {
 	int ret;
 
-	if (!crypt_s390_func_available(KIMD_SHA_512))
+	if (!crypt_s390_func_available(KIMD_SHA_512, CRYPT_S390_MSA))
 		return -EOPNOTSUPP;
 	if ((ret = crypto_register_shash(&sha512_alg)) < 0)
 		goto out;

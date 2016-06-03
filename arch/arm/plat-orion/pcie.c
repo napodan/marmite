@@ -13,6 +13,8 @@
 #include <linux/mbus.h>
 #include <asm/mach/pci.h>
 #include <plat/pcie.h>
+#include <plat/addr-map.h>
+#include <linux/delay.h>
 
 /*
  * PCIe unit register offsets.
@@ -46,14 +48,16 @@
 #define  PCIE_STAT_BUS_OFFS		8
 #define  PCIE_STAT_BUS_MASK		0xff
 #define  PCIE_STAT_LINK_DOWN		1
+#define PCIE_DEBUG_CTRL         0x1a60
+#define  PCIE_DEBUG_SOFT_RESET		(1<<20)
 
 
-u32 __init orion_pcie_dev_id(void __iomem *base)
+u32 orion_pcie_dev_id(void __iomem *base)
 {
 	return readl(base + PCIE_DEV_ID_OFF) >> 16;
 }
 
-u32 __init orion_pcie_rev(void __iomem *base)
+u32 orion_pcie_rev(void __iomem *base)
 {
 	return readl(base + PCIE_DEV_REV_OFF) & 0xff;
 }
@@ -85,16 +89,44 @@ void __init orion_pcie_set_local_bus_nr(void __iomem *base, int nr)
 	writel(stat, base + PCIE_STAT_OFF);
 }
 
+void __init orion_pcie_reset(void __iomem *base)
+{
+	u32 reg;
+	int i;
+
+	/*
+	 * MV-S104860-U0, Rev. C:
+	 * PCI Express Unit Soft Reset
+	 * When set, generates an internal reset in the PCI Express unit.
+	 * This bit should be cleared after the link is re-established.
+	 */
+	reg = readl(base + PCIE_DEBUG_CTRL);
+	reg |= PCIE_DEBUG_SOFT_RESET;
+	writel(reg, base + PCIE_DEBUG_CTRL);
+
+	for (i = 0; i < 20; i++) {
+		mdelay(10);
+
+		if (orion_pcie_link_up(base))
+			break;
+	}
+
+	reg &= ~(PCIE_DEBUG_SOFT_RESET);
+	writel(reg, base + PCIE_DEBUG_CTRL);
+}
+
 /*
  * Setup PCIE BARs and Address Decode Wins:
  * BAR[0,2] -> disabled, BAR[1] -> covers all DRAM banks
  * WIN[0-3] -> DRAM bank[0-3]
  */
-static void __init orion_pcie_setup_wins(void __iomem *base,
-					 struct mbus_dram_target_info *dram)
+static void __init orion_pcie_setup_wins(void __iomem *base)
 {
+	const struct mbus_dram_target_info *dram;
 	u32 size;
 	int i;
+
+	dram = mv_mbus_dram_info();
 
 	/*
 	 * First, disable and clear BARs and windows.
@@ -120,7 +152,7 @@ static void __init orion_pcie_setup_wins(void __iomem *base,
 	 */
 	size = 0;
 	for (i = 0; i < dram->num_cs; i++) {
-		struct mbus_dram_window *cs = dram->cs + i;
+		const struct mbus_dram_window *cs = dram->cs + i;
 
 		writel(cs->base & 0xffff0000, base + PCIE_WIN04_BASE_OFF(i));
 		writel(0, base + PCIE_WIN04_REMAP_OFF(i));
@@ -146,8 +178,7 @@ static void __init orion_pcie_setup_wins(void __iomem *base,
 	writel(((size - 1) & 0xffff0000) | 1, base + PCIE_BAR_CTRL_OFF(1));
 }
 
-void __init orion_pcie_setup(void __iomem *base,
-			     struct mbus_dram_target_info *dram)
+void __init orion_pcie_setup(void __iomem *base)
 {
 	u16 cmd;
 	u32 mask;
@@ -155,7 +186,7 @@ void __init orion_pcie_setup(void __iomem *base,
 	/*
 	 * Point PCIe unit MBUS decode windows to DRAM space.
 	 */
-	orion_pcie_setup_wins(base, dram);
+	orion_pcie_setup_wins(base);
 
 	/*
 	 * Master + slave enable.

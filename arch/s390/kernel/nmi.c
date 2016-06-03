@@ -1,13 +1,14 @@
 /*
  *   Machine check handler
  *
- *    Copyright IBM Corp. 2000,2009
+ *    Copyright IBM Corp. 2000, 2009
  *    Author(s): Ingo Adlung <adlung@de.ibm.com>,
  *		 Martin Schwidefsky <schwidefsky@de.ibm.com>,
  *		 Cornelia Huck <cornelia.huck@de.ibm.com>,
  *		 Heiko Carstens <heiko.carstens@de.ibm.com>,
  */
 
+#include <linux/kernel_stat.h>
 #include <linux/init.h>
 #include <linux/errno.h>
 #include <linux/hardirq.h>
@@ -29,7 +30,7 @@ struct mcck_struct {
 
 static DEFINE_PER_CPU(struct mcck_struct, cpu_mcck);
 
-static NORET_TYPE void s390_handle_damage(char *msg)
+static void s390_handle_damage(char *msg)
 {
 	smp_send_stop();
 	disabled_wait((unsigned long) __builtin_return_address(0));
@@ -253,9 +254,7 @@ void notrace s390_do_machine_check(struct pt_regs *regs)
 	int umode;
 
 	nmi_enter();
-	s390_idle_check(regs, S390_lowcore.mcck_clock,
-			S390_lowcore.mcck_enter_timer);
-
+	inc_irq_stat(NMI_NMI);
 	mci = (struct mci *) &S390_lowcore.mcck_interruption_code;
 	mcck = &__get_cpu_var(cpu_mcck);
 	umode = user_mode(regs);
@@ -294,7 +293,7 @@ void notrace s390_do_machine_check(struct pt_regs *regs)
 			 * retry this instruction.
 			 */
 			spin_lock(&ipd_lock);
-			tmp = get_clock();
+			tmp = get_tod_clock();
 			if (((tmp - last_ipd) >> 12) < MAX_IPD_TIME)
 				ipd_count++;
 			else

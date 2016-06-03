@@ -125,6 +125,15 @@
 	and	\reg, sp
 	.endm
 
+ENTRY(ret_from_kernel_thread)
+	pop	r0
+	bl	schedule_tail
+	GET_THREAD_INFO(r8)
+	ld	r0, R0(r8)
+	ld	r1, R1(r8)
+	jl	r1
+	bra	syscall_exit
+
 ENTRY(ret_from_fork)
 	pop	r0
 	bl	schedule_tail
@@ -235,10 +244,9 @@ work_resched:
 work_notifysig:				; deal with pending signals and
 					; notify-resume requests
 	mv	r0, sp			; arg1 : struct pt_regs *regs
-	ldi	r1, #0			; arg2 : sigset_t *oldset
-	mv	r2, r9			; arg3 : __u32 thread_info_flags
+	mv	r1, r9			; arg2 : __u32 thread_info_flags
 	bl	do_notify_resume
-	bra	restore_all
+	bra	resume_userspace
 
 	; perform syscall exit tracing
 	ALIGN

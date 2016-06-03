@@ -13,6 +13,7 @@
 #include <linux/init.h>
 #include <linux/pci.h>
 #include <asm/io.h>
+#include <asm/irq.h>
 #include <asm/setup.h>
 #include <asm/processor.h>
 #include <asm/intctl-regs.h>
@@ -26,8 +27,10 @@ asmlinkage void __init unit_init(void)
 {
 #ifndef CONFIG_GDBSTUB_ON_TTYSx
 	/* set the 16550 interrupt line to level 3 if not being used for GDB */
-	set_intr_level(XIRQ0, GxICR_LEVEL_3);
+#ifdef CONFIG_EXT_SERIAL_IRQ_LEVEL
+	set_intr_level(XIRQ0, NUM2GxICR_LEVEL(CONFIG_EXT_SERIAL_IRQ_LEVEL));
 #endif
+#endif /* CONFIG_GDBSTUB_ON_TTYSx */
 }
 
 /*
@@ -51,7 +54,7 @@ void __init unit_init_IRQ(void)
 		switch (GET_XIRQ_TRIGGER(extnum)) {
 		case XIRQ_TRIGGER_HILEVEL:
 		case XIRQ_TRIGGER_LOWLEVEL:
-			set_intr_postackable(XIRQ2IRQ(extnum));
+			mn10300_set_lateack_irq_type(XIRQ2IRQ(extnum));
 			break;
 		default:
 			break;

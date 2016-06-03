@@ -20,7 +20,6 @@
 #include <linux/i2c.h>
 #include <linux/pci.h>
 #include <linux/spi/spi.h>
-#include <linux/spi/orion_spi.h>
 #include <linux/spi/flash.h>
 #include <linux/gpio.h>
 #include <asm/mach-types.h>
@@ -82,6 +81,8 @@ static void __init dove_db_init(void)
 	dove_ehci0_init();
 	dove_ehci1_init();
 	dove_sata_init(&dove_db_sata_data);
+	dove_sdio0_init();
+	dove_sdio1_init();
 	dove_spi0_init();
 	dove_spi1_init();
 	dove_uart0_init();
@@ -92,11 +93,11 @@ static void __init dove_db_init(void)
 }
 
 MACHINE_START(DOVE_DB, "Marvell DB-MV88AP510-BP Development Board")
-	.phys_io	= DOVE_SB_REGS_PHYS_BASE,
-	.io_pg_offst	= ((DOVE_SB_REGS_VIRT_BASE) >> 18) & 0xfffc,
-	.boot_params	= 0x00000100,
+	.atag_offset	= 0x100,
 	.init_machine	= dove_db_init,
 	.map_io		= dove_map_io,
+	.init_early	= dove_init_early,
 	.init_irq	= dove_init_irq,
-	.timer		= &dove_timer,
+	.init_time	= dove_timer_init,
+	.restart	= dove_restart,
 MACHINE_END

@@ -16,14 +16,19 @@
 #include <linux/smc91x.h>
 #include <linux/io.h>
 #include <linux/gpio.h>
+#include <linux/gpio-pxa.h>
+#include <linux/interrupt.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 #include <mach/addr-map.h>
 #include <mach/mfp-mmp2.h>
 #include <mach/mmp2.h>
+#include <mach/irqs.h>
 
 #include "common.h"
+
+#define FLINT_NR_IRQS	(MMP_NR_IRQS + 48)
 
 static unsigned long flint_pin_config[] __initdata = {
 	/* UART1 */
@@ -44,7 +49,7 @@ static unsigned long flint_pin_config[] __initdata = {
 	GPIO113_SMC_RDY,
 
 	/*Ethernet*/
-	GPIO155_GPIO155,
+	GPIO155_GPIO,
 
 	/* DFI */
 	GPIO168_DFI_D0,
@@ -73,6 +78,10 @@ static unsigned long flint_pin_config[] __initdata = {
 	GPIO160_ND_RDY1,
 };
 
+static struct pxa_gpio_platform_data mmp2_gpio_pdata = {
+	.irq_base	= MMP_GPIO_TO_IRQ(0),
+};
+
 static struct smc91x_platdata flint_smc91x_info = {
 	.flags  = SMC91X_USE_16BIT | SMC91X_NOWAIT,
 };
@@ -84,8 +93,8 @@ static struct resource smc91x_resources[] = {
 		.flags  = IORESOURCE_MEM,
 	},
 	[1] = {
-		.start  = gpio_to_irq(155),
-		.end    = gpio_to_irq(155),
+		.start  = MMP_GPIO_TO_IRQ(155),
+		.end    = MMP_GPIO_TO_IRQ(155),
 		.flags  = IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHEDGE,
 	}
 };
@@ -107,17 +116,19 @@ static void __init flint_init(void)
 	/* on-chip devices */
 	mmp2_add_uart(1);
 	mmp2_add_uart(2);
+	platform_device_add_data(&mmp2_device_gpio, &mmp2_gpio_pdata,
+				 sizeof(struct pxa_gpio_platform_data));
+	platform_device_register(&mmp2_device_gpio);
 
 	/* off-chip devices */
 	platform_device_register(&smc91x_device);
 }
 
 MACHINE_START(FLINT, "Flint Development Platform")
-	.phys_io        = APB_PHYS_BASE,
-	.boot_params    = 0x00000100,
-	.io_pg_offst    = (APB_VIRT_BASE >> 18) & 0xfffc,
-	.map_io		= pxa_map_io,
+	.map_io		= mmp_map_io,
+	.nr_irqs	= FLINT_NR_IRQS,
 	.init_irq       = mmp2_init_irq,
-	.timer          = &mmp2_timer,
+	.init_time	= mmp2_timer_init,
 	.init_machine   = flint_init,
+	.restart	= mmp_restart,
 MACHINE_END

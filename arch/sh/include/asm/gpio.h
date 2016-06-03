@@ -20,7 +20,7 @@
 #endif
 
 #define ARCH_NR_GPIOS 512
-#include <linux/sh_pfc.h>
+#include <asm-generic/gpio.h>
 
 #ifdef CONFIG_GPIOLIB
 
@@ -41,14 +41,12 @@ static inline int gpio_cansleep(unsigned gpio)
 
 static inline int gpio_to_irq(unsigned gpio)
 {
-	WARN_ON(1);
-	return -ENOSYS;
+	return __gpio_to_irq(gpio);
 }
 
 static inline int irq_to_gpio(unsigned int irq)
 {
-	WARN_ON(1);
-	return -EINVAL;
+	return -ENOSYS;
 }
 
 #endif /* CONFIG_GPIOLIB */

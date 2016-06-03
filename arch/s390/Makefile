@@ -24,7 +24,8 @@ CHECKFLAGS	+= -D__s390__ -msize-long
 else
 LD_BFD		:= elf64-s390
 LDFLAGS		:= -m elf64_s390
-MODFLAGS	+= -fpic -D__PIC__
+KBUILD_AFLAGS_MODULE += -fPIC
+KBUILD_CFLAGS_MODULE += -fPIC
 KBUILD_CFLAGS	+= -m64
 KBUILD_AFLAGS	+= -m64
 UTS_MACHINE	:= s390x
@@ -39,6 +40,8 @@ cflags-$(CONFIG_MARCH_Z900) += $(call cc-option,-march=z900)
 cflags-$(CONFIG_MARCH_Z990) += $(call cc-option,-march=z990)
 cflags-$(CONFIG_MARCH_Z9_109) += $(call cc-option,-march=z9-109)
 cflags-$(CONFIG_MARCH_Z10) += $(call cc-option,-march=z10)
+cflags-$(CONFIG_MARCH_Z196) += $(call cc-option,-march=z196)
+cflags-$(CONFIG_MARCH_ZEC12) += $(call cc-option,-march=zEC12)
 
 #KBUILD_IMAGE is necessary for make rpm
 KBUILD_IMAGE	:=arch/s390/boot/image
@@ -52,22 +55,12 @@ cflags-$(CONFIG_FRAME_POINTER) += -fno-optimize-sibling-calls
 ifeq ($(call cc-option-yn,-mkernel-backchain),y)
 cflags-$(CONFIG_PACK_STACK)  += -mkernel-backchain -D__PACK_STACK
 aflags-$(CONFIG_PACK_STACK)  += -D__PACK_STACK
-cflags-$(CONFIG_SMALL_STACK) += -D__SMALL_STACK
-aflags-$(CONFIG_SMALL_STACK) += -D__SMALL_STACK
-ifdef CONFIG_SMALL_STACK
-STACK_SIZE := $(shell echo $$(($(STACK_SIZE)/2)) )
-endif
 endif
 
 # new style option for packed stacks
 ifeq ($(call cc-option-yn,-mpacked-stack),y)
 cflags-$(CONFIG_PACK_STACK)  += -mpacked-stack -D__PACK_STACK
 aflags-$(CONFIG_PACK_STACK)  += -D__PACK_STACK
-cflags-$(CONFIG_SMALL_STACK) += -D__SMALL_STACK
-aflags-$(CONFIG_SMALL_STACK) += -D__SMALL_STACK
-ifdef CONFIG_SMALL_STACK
-STACK_SIZE := $(shell echo $$(($(STACK_SIZE)/2)) )
-endif
 endif
 
 ifeq ($(call cc-option-yn,-mstack-size=8192 -mstack-guard=128),y)
@@ -78,8 +71,7 @@ endif
 endif
 
 ifeq ($(call cc-option-yn,-mwarn-dynamicstack),y)
-cflags-$(CONFIG_WARN_STACK) += -mwarn-dynamicstack
-cflags-$(CONFIG_WARN_STACK) += -mwarn-framesize=$(CONFIG_WARN_STACK_SIZE)
+cflags-$(CONFIG_WARN_DYNAMIC_STACK) += -mwarn-dynamicstack
 endif
 
 KBUILD_CFLAGS	+= -mbackchain -msoft-float $(cflags-y)
@@ -87,18 +79,15 @@ KBUILD_CFLAGS	+= -pipe -fno-strength-reduce -Wno-sign-compare
 KBUILD_AFLAGS	+= $(aflags-y)
 
 OBJCOPYFLAGS	:= -O binary
-LDFLAGS_vmlinux := -e start
 
 head-y		:= arch/s390/kernel/head.o
 head-y		+= arch/s390/kernel/$(if $(CONFIG_64BIT),head64.o,head31.o)
-head-y		+= arch/s390/kernel/init_task.o
 
-core-y		+= arch/s390/mm/ arch/s390/kernel/ arch/s390/crypto/ \
-		   arch/s390/appldata/ arch/s390/hypfs/ arch/s390/kvm/
+# See arch/s390/Kbuild for content of core part of the kernel
+core-y		+= arch/s390/
 
 libs-y		+= arch/s390/lib/
 drivers-y	+= drivers/s390/
-drivers-$(CONFIG_MATHEMU) += arch/s390/math-emu/
 
 # must be linked after kernel
 drivers-$(CONFIG_OPROFILE)	+= arch/s390/oprofile/

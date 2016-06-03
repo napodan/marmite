@@ -68,7 +68,12 @@
 #define VMALLOC_START		0xC0000000
 #define VMALLOC_END		0xC7FEFFFF
 #define TLBTEMP_BASE_1		0xC7FF0000
-#define TLBTEMP_BASE_2		0xC7FF8000
+#define TLBTEMP_BASE_2		(TLBTEMP_BASE_1 + DCACHE_WAY_SIZE)
+#if 2 * DCACHE_WAY_SIZE > ICACHE_WAY_SIZE
+#define TLBTEMP_SIZE		(2 * DCACHE_WAY_SIZE)
+#else
+#define TLBTEMP_SIZE		ICACHE_WAY_SIZE
+#endif
 
 /*
  * Xtensa Linux config PTE layout (when present):
@@ -284,7 +289,7 @@ struct vm_area_struct;
 
 static inline int
 ptep_test_and_clear_young(struct vm_area_struct *vma, unsigned long addr,
-    			  pte_t *ptep)
+			  pte_t *ptep)
 {
 	pte_t pte = *ptep;
 	if (!pte_young(pte))
@@ -304,8 +309,8 @@ ptep_get_and_clear(struct mm_struct *mm, unsigned long addr, pte_t *ptep)
 static inline void
 ptep_set_wrprotect(struct mm_struct *mm, unsigned long addr, pte_t *ptep)
 {
-  	pte_t pte = *ptep;
-  	update_pte(ptep, pte_wrprotect(pte));
+	pte_t pte = *ptep;
+	update_pte(ptep, pte_wrprotect(pte));
 }
 
 /* to find an entry in a kernel page-table-directory */
@@ -324,10 +329,7 @@ ptep_set_wrprotect(struct mm_struct *mm, unsigned long addr, pte_t *ptep)
 #define pte_offset_kernel(dir,addr) 					\
 	((pte_t*) pmd_page_vaddr(*(dir)) + pte_index(addr))
 #define pte_offset_map(dir,addr)	pte_offset_kernel((dir),(addr))
-#define pte_offset_map_nested(dir,addr)	pte_offset_kernel((dir),(addr))
-
 #define pte_unmap(pte)		do { } while (0)
-#define pte_unmap_nested(pte)	do { } while (0)
 
 
 /*
@@ -396,14 +398,6 @@ ptep_set_wrprotect(struct mm_struct *mm, unsigned long addr, pte_t *ptep)
 extern  void update_mmu_cache(struct vm_area_struct * vma,
 			      unsigned long address, pte_t *ptep);
 
-/*
- * remap a physical page `pfn' of size `size' with page protection `prot'
- * into virtual address `from'
- */
-
-#define io_remap_pfn_range(vma,from,pfn,size,prot) \
-                remap_pfn_range(vma, from, pfn, size, prot)
-
 typedef pte_t *pte_addr_t;
 
 #endif /* !defined (__ASSEMBLY__) */
@@ -413,6 +407,10 @@ typedef pte_t *pte_addr_t;
 #define __HAVE_ARCH_PTEP_SET_WRPROTECT
 #define __HAVE_ARCH_PTEP_MKDIRTY
 #define __HAVE_ARCH_PTE_SAME
+/* We provide our own get_unmapped_area to cope with
+ * SHM area cache aliasing for userland.
+ */
+#define HAVE_ARCH_UNMAPPED_AREA
 
 #include <asm-generic/pgtable.h>
 

@@ -23,6 +23,7 @@ void foo(void)
 
 	OFFSET(TI_task,			thread_info, task);
 	OFFSET(TI_exec_domain,		thread_info, exec_domain);
+	OFFSET(TI_frame,		thread_info, frame);
 	OFFSET(TI_flags,		thread_info, flags);
 	OFFSET(TI_cpu,			thread_info, cpu);
 	OFFSET(TI_preempt_count,	thread_info, preempt_count);
@@ -66,7 +67,15 @@ void foo(void)
 	OFFSET(THREAD_SP,		thread_struct, sp);
 	OFFSET(THREAD_A3,		thread_struct, a3);
 	OFFSET(THREAD_USP,		thread_struct, usp);
-	OFFSET(THREAD_FRAME,		thread_struct, __frame);
+#ifdef CONFIG_FPU
+	OFFSET(THREAD_FPU_FLAGS,	thread_struct, fpu_flags);
+	OFFSET(THREAD_FPU_STATE,	thread_struct, fpu_state);
+	DEFINE(__THREAD_USING_FPU,	THREAD_USING_FPU);
+	DEFINE(__THREAD_HAS_FPU,	THREAD_HAS_FPU);
+#endif /* CONFIG_FPU */
+	BLANK();
+
+	OFFSET(TASK_THREAD,		task_struct, thread);
 	BLANK();
 
 	DEFINE(CLONE_VM_asm,		CLONE_VM);
@@ -87,7 +96,7 @@ void foo(void)
 	OFFSET(__rx_outp,		mn10300_serial_port, rx_outp);
 	OFFSET(__uart_state,		mn10300_serial_port, uart.state);
 	OFFSET(__tx_xchar,		mn10300_serial_port, tx_xchar);
-	OFFSET(__tx_break,		mn10300_serial_port, tx_break);
+	OFFSET(__tx_flags,		mn10300_serial_port, tx_flags);
 	OFFSET(__intr_flags,		mn10300_serial_port, intr_flags);
 	OFFSET(__rx_icr,		mn10300_serial_port, rx_icr);
 	OFFSET(__tx_icr,		mn10300_serial_port, tx_icr);

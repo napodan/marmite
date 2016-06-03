@@ -6,7 +6,7 @@
  */
 
 #include <asm/romimage-macros.h>
-#include "partner-jet-setup.txt"
+#include <mach/partner-jet-setup.txt>
 
 	/* execute icbi after enabling cache */
 	mov.l	1f, r0
@@ -23,7 +23,7 @@
 
 #else /* __ASSEMBLY__ */
 
-extern inline void mmcif_update_progress(int nr)
+static inline void mmcif_update_progress(int nr)
 {
 }
 

@@ -36,21 +36,18 @@
 #include <asm/sn/sn0/hubio.h>
 #include <asm/pci/bridge.h>
 
-static void enable_rt_irq(unsigned int irq)
+static void enable_rt_irq(struct irq_data *d)
 {
 }
 
-static void disable_rt_irq(unsigned int irq)
+static void disable_rt_irq(struct irq_data *d)
 {
 }
 
 static struct irq_chip rt_irq_type = {
 	.name		= "SN HUB RT timer",
-	.ack		= disable_rt_irq,
-	.mask		= disable_rt_irq,
-	.mask_ack	= disable_rt_irq,
-	.unmask		= enable_rt_irq,
-	.eoi		= enable_rt_irq,
+	.irq_mask	= disable_rt_irq,
+	.irq_unmask	= enable_rt_irq,
 };
 
 static int rt_next_event(unsigned long delta, struct clock_event_device *evt)
@@ -69,21 +66,10 @@ static int rt_next_event(unsigned long delta, struct clock_event_device *evt)
 static void rt_set_mode(enum clock_event_mode mode,
 		struct clock_event_device *evt)
 {
-	switch (mode) {
-	case CLOCK_EVT_MODE_ONESHOT:
-		/* The only mode supported */
-		break;
-
-	case CLOCK_EVT_MODE_PERIODIC:
-	case CLOCK_EVT_MODE_UNUSED:
-	case CLOCK_EVT_MODE_SHUTDOWN:
-	case CLOCK_EVT_MODE_RESUME:
-		/* Nothing to do  */
-		break;
-	}
+	/* Nothing to do ...  */
 }
 
-int rt_timer_irq;
+unsigned int rt_timer_irq;
 
 static DEFINE_PER_CPU(struct clock_event_device, hub_rt_clockevent);
 static DEFINE_PER_CPU(char [11], hub_rt_name);
@@ -105,7 +91,7 @@ static irqreturn_t hub_rt_counter_handler(int irq, void *dev_id)
 
 struct irqaction hub_rt_irqaction = {
 	.handler	= hub_rt_counter_handler,
-	.flags		= IRQF_DISABLED | IRQF_PERCPU | IRQF_TIMER,
+	.flags		= IRQF_PERCPU | IRQF_TIMER,
 	.name		= "hub-rt",
 };
 
@@ -131,8 +117,8 @@ void __cpuinit hub_rt_clock_event_init(void)
 	cd->name		= name;
 	cd->features		= CLOCK_EVT_FEAT_ONESHOT;
 	clockevent_set_clock(cd, CYCLES_PER_SEC);
-	cd->max_delta_ns        = clockevent_delta2ns(0xfffffffffffff, cd);
-	cd->min_delta_ns        = clockevent_delta2ns(0x300, cd);
+	cd->max_delta_ns	= clockevent_delta2ns(0xfffffffffffff, cd);
+	cd->min_delta_ns	= clockevent_delta2ns(0x300, cd);
 	cd->rating		= 200;
 	cd->irq			= irq;
 	cd->cpumask		= cpumask_of(cpu);
@@ -156,7 +142,7 @@ static void __init hub_rt_clock_event_global_init(void)
 			panic("Allocation of irq number for timer failed");
 	} while (xchg(&rt_timer_irq, irq));
 
-	set_irq_chip_and_handler(irq, &rt_irq_type, handle_percpu_irq);
+	irq_set_chip_and_handler(irq, &rt_irq_type, handle_percpu_irq);
 	setup_irq(irq, &hub_rt_irqaction);
 }
 
@@ -167,7 +153,7 @@ static cycle_t hub_rt_read(struct clocksource *cs)
 
 struct clocksource hub_rt_clocksource = {
 	.name	= "HUB-RT",
-	.rating	= 200,
+	.rating = 200,
 	.read	= hub_rt_read,
 	.mask	= CLOCKSOURCE_MASK(52),
 	.flags	= CLOCK_SOURCE_IS_CONTINUOUS,
@@ -177,8 +163,7 @@ static void __init hub_rt_clocksource_init(void)
 {
 	struct clocksource *cs = &hub_rt_clocksource;
 
-	clocksource_set_clock(cs, CYCLES_PER_SEC);
-	clocksource_register(cs);
+	clocksource_register_hz(cs, CYCLES_PER_SEC);
 }
 
 void __init plat_time_init(void)

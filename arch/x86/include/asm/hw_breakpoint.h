@@ -1,7 +1,8 @@
 #ifndef	_I386_HW_BREAKPOINT_H
 #define	_I386_HW_BREAKPOINT_H
 
-#ifdef	__KERNEL__
+#include <uapi/asm/hw_breakpoint.h>
+
 #define	__ARCH_HW_BREAKPOINT_H
 
 /*
@@ -20,10 +21,10 @@ struct arch_hw_breakpoint {
 #include <linux/list.h>
 
 /* Available HW breakpoint length encodings */
+#define X86_BREAKPOINT_LEN_X		0x40
 #define X86_BREAKPOINT_LEN_1		0x40
 #define X86_BREAKPOINT_LEN_2		0x44
 #define X86_BREAKPOINT_LEN_4		0x4c
-#define X86_BREAKPOINT_LEN_EXECUTE	0x40
 
 #ifdef CONFIG_X86_64
 #define X86_BREAKPOINT_LEN_8		0x48
@@ -71,6 +72,4 @@ extern int arch_bp_generic_fields(int x86_len, int x86_type,
 
 extern struct pmu perf_ops_bp;
 
-#endif	/* __KERNEL__ */
 #endif	/* _I386_HW_BREAKPOINT_H */
-

@@ -8,32 +8,23 @@
  * warranty of any kind, whether express or implied.
  */
 
-#include <linux/kernel.h>
-#include <linux/delay.h>
+#include <linux/clk-provider.h>
+#include <linux/clk/mvebu.h>
+#include <linux/dma-mapping.h>
 #include <linux/init.h>
+#include <linux/of.h>
+#include <linux/of_platform.h>
+#include <linux/platform_data/dma-mv_xor.h>
+#include <linux/platform_data/usb-ehci-orion.h>
 #include <linux/platform_device.h>
-#include <linux/pci.h>
-#include <linux/serial_8250.h>
-#include <linux/clk.h>
-#include <linux/mbus.h>
-#include <linux/mv643xx_eth.h>
-#include <linux/mv643xx_i2c.h>
-#include <linux/ata_platform.h>
-#include <linux/spi/orion_spi.h>
-#include <linux/gpio.h>
-#include <asm/page.h>
-#include <asm/setup.h>
-#include <asm/timex.h>
 #include <asm/hardware/cache-tauros2.h>
+#include <asm/mach/arch.h>
 #include <asm/mach/map.h>
 #include <asm/mach/time.h>
-#include <asm/mach/pci.h>
-#include <mach/dove.h>
 #include <mach/bridge-regs.h>
-#include <asm/mach/arch.h>
-#include <linux/irq.h>
-#include <plat/mv_xor.h>
-#include <plat/ehci-orion.h>
+#include <mach/pm.h>
+#include <plat/common.h>
+#include <plat/irq.h>
 #include <plat/time.h>
 #include "common.h"
 
@@ -42,24 +33,14 @@
  ****************************************************************************/
 static struct map_desc dove_io_desc[] __initdata = {
 	{
-		.virtual	= DOVE_SB_REGS_VIRT_BASE,
+		.virtual	= (unsigned long) DOVE_SB_REGS_VIRT_BASE,
 		.pfn		= __phys_to_pfn(DOVE_SB_REGS_PHYS_BASE),
 		.length		= DOVE_SB_REGS_SIZE,
 		.type		= MT_DEVICE,
 	}, {
-		.virtual	= DOVE_NB_REGS_VIRT_BASE,
+		.virtual	= (unsigned long) DOVE_NB_REGS_VIRT_BASE,
 		.pfn		= __phys_to_pfn(DOVE_NB_REGS_PHYS_BASE),
 		.length		= DOVE_NB_REGS_SIZE,
-		.type		= MT_DEVICE,
-	}, {
-		.virtual	= DOVE_PCIE0_IO_VIRT_BASE,
-		.pfn		= __phys_to_pfn(DOVE_PCIE0_IO_PHYS_BASE),
-		.length		= DOVE_PCIE0_IO_SIZE,
-		.type		= MT_DEVICE,
-	}, {
-		.virtual	= DOVE_PCIE1_IO_VIRT_BASE,
-		.pfn		= __phys_to_pfn(DOVE_PCIE1_IO_PHYS_BASE),
-		.length		= DOVE_PCIE1_IO_SIZE,
 		.type		= MT_DEVICE,
 	},
 };
@@ -70,712 +51,349 @@ void __init dove_map_io(void)
 }
 
 /*****************************************************************************
- * EHCI
+ * CLK tree
  ****************************************************************************/
-static struct orion_ehci_data dove_ehci_data = {
-	.dram		= &dove_mbus_dram_info,
-	.phy_version	= EHCI_PHY_NA,
-};
+static int dove_tclk;
 
-static u64 ehci_dmamask = DMA_BIT_MASK(32);
+static DEFINE_SPINLOCK(gating_lock);
+static struct clk *tclk;
+
+static struct clk __init *dove_register_gate(const char *name,
+					     const char *parent, u8 bit_idx)
+{
+	return clk_register_gate(NULL, name, parent, 0,
+				 (void __iomem *)CLOCK_GATING_CONTROL,
+				 bit_idx, 0, &gating_lock);
+}
+
+static void __init dove_clk_init(void)
+{
+	struct clk *usb0, *usb1, *sata, *pex0, *pex1, *sdio0, *sdio1;
+	struct clk *nand, *camera, *i2s0, *i2s1, *crypto, *ac97, *pdma;
+	struct clk *xor0, *xor1, *ge, *gephy;
+
+	tclk = clk_register_fixed_rate(NULL, "tclk", NULL, CLK_IS_ROOT,
+				       dove_tclk);
+
+	usb0 = dove_register_gate("usb0", "tclk", CLOCK_GATING_BIT_USB0);
+	usb1 = dove_register_gate("usb1", "tclk", CLOCK_GATING_BIT_USB1);
+	sata = dove_register_gate("sata", "tclk", CLOCK_GATING_BIT_SATA);
+	pex0 = dove_register_gate("pex0", "tclk", CLOCK_GATING_BIT_PCIE0);
+	pex1 = dove_register_gate("pex1", "tclk", CLOCK_GATING_BIT_PCIE1);
+	sdio0 = dove_register_gate("sdio0", "tclk", CLOCK_GATING_BIT_SDIO0);
+	sdio1 = dove_register_gate("sdio1", "tclk", CLOCK_GATING_BIT_SDIO1);
+	nand = dove_register_gate("nand", "tclk", CLOCK_GATING_BIT_NAND);
+	camera = dove_register_gate("camera", "tclk", CLOCK_GATING_BIT_CAMERA);
+	i2s0 = dove_register_gate("i2s0", "tclk", CLOCK_GATING_BIT_I2S0);
+	i2s1 = dove_register_gate("i2s1", "tclk", CLOCK_GATING_BIT_I2S1);
+	crypto = dove_register_gate("crypto", "tclk", CLOCK_GATING_BIT_CRYPTO);
+	ac97 = dove_register_gate("ac97", "tclk", CLOCK_GATING_BIT_AC97);
+	pdma = dove_register_gate("pdma", "tclk", CLOCK_GATING_BIT_PDMA);
+	xor0 = dove_register_gate("xor0", "tclk", CLOCK_GATING_BIT_XOR0);
+	xor1 = dove_register_gate("xor1", "tclk", CLOCK_GATING_BIT_XOR1);
+	gephy = dove_register_gate("gephy", "tclk", CLOCK_GATING_BIT_GIGA_PHY);
+	ge = dove_register_gate("ge", "gephy", CLOCK_GATING_BIT_GBE);
+
+	orion_clkdev_add(NULL, "orion_spi.0", tclk);
+	orion_clkdev_add(NULL, "orion_spi.1", tclk);
+	orion_clkdev_add(NULL, "orion_wdt", tclk);
+	orion_clkdev_add(NULL, "mv64xxx_i2c.0", tclk);
+
+	orion_clkdev_add(NULL, "orion-ehci.0", usb0);
+	orion_clkdev_add(NULL, "orion-ehci.1", usb1);
+	orion_clkdev_add(NULL, "mv643xx_eth_port.0", ge);
+	orion_clkdev_add(NULL, "sata_mv.0", sata);
+	orion_clkdev_add("0", "pcie", pex0);
+	orion_clkdev_add("1", "pcie", pex1);
+	orion_clkdev_add(NULL, "sdhci-dove.0", sdio0);
+	orion_clkdev_add(NULL, "sdhci-dove.1", sdio1);
+	orion_clkdev_add(NULL, "orion_nand", nand);
+	orion_clkdev_add(NULL, "cafe1000-ccic.0", camera);
+	orion_clkdev_add(NULL, "kirkwood-i2s.0", i2s0);
+	orion_clkdev_add(NULL, "kirkwood-i2s.1", i2s1);
+	orion_clkdev_add(NULL, "mv_crypto", crypto);
+	orion_clkdev_add(NULL, "dove-ac97", ac97);
+	orion_clkdev_add(NULL, "dove-pdma", pdma);
+	orion_clkdev_add(NULL, MV_XOR_NAME ".0", xor0);
+	orion_clkdev_add(NULL, MV_XOR_NAME ".1", xor1);
+}
 
 /*****************************************************************************
  * EHCI0
  ****************************************************************************/
-static struct resource dove_ehci0_resources[] = {
-	{
-		.start	= DOVE_USB0_PHYS_BASE,
-		.end	= DOVE_USB0_PHYS_BASE + SZ_4K - 1,
-		.flags	= IORESOURCE_MEM,
-	}, {
-		.start	= IRQ_DOVE_USB0,
-		.end	= IRQ_DOVE_USB0,
-		.flags	= IORESOURCE_IRQ,
-	},
-};
-
-static struct platform_device dove_ehci0 = {
-	.name		= "orion-ehci",
-	.id		= 0,
-	.dev		= {
-		.dma_mask		= &ehci_dmamask,
-		.coherent_dma_mask	= DMA_BIT_MASK(32),
-		.platform_data		= &dove_ehci_data,
-	},
-	.resource	= dove_ehci0_resources,
-	.num_resources	= ARRAY_SIZE(dove_ehci0_resources),
-};
-
 void __init dove_ehci0_init(void)
 {
-	platform_device_register(&dove_ehci0);
+	orion_ehci_init(DOVE_USB0_PHYS_BASE, IRQ_DOVE_USB0, EHCI_PHY_NA);
 }
 
 /*****************************************************************************
  * EHCI1
  ****************************************************************************/
-static struct resource dove_ehci1_resources[] = {
-	{
-		.start	= DOVE_USB1_PHYS_BASE,
-		.end	= DOVE_USB1_PHYS_BASE + SZ_4K - 1,
-		.flags	= IORESOURCE_MEM,
-	}, {
-		.start	= IRQ_DOVE_USB1,
-		.end	= IRQ_DOVE_USB1,
-		.flags	= IORESOURCE_IRQ,
-	},
-};
-
-static struct platform_device dove_ehci1 = {
-	.name		= "orion-ehci",
-	.id		= 1,
-	.dev		= {
-		.dma_mask		= &ehci_dmamask,
-		.coherent_dma_mask	= DMA_BIT_MASK(32),
-		.platform_data		= &dove_ehci_data,
-	},
-	.resource	= dove_ehci1_resources,
-	.num_resources	= ARRAY_SIZE(dove_ehci1_resources),
-};
-
 void __init dove_ehci1_init(void)
 {
-	platform_device_register(&dove_ehci1);
+	orion_ehci_1_init(DOVE_USB1_PHYS_BASE, IRQ_DOVE_USB1);
 }
 
 /*****************************************************************************
  * GE00
  ****************************************************************************/
-struct mv643xx_eth_shared_platform_data dove_ge00_shared_data = {
-	.t_clk		= 0,
-	.dram		= &dove_mbus_dram_info,
-};
-
-static struct resource dove_ge00_shared_resources[] = {
-	{
-		.name	= "ge00 base",
-		.start	= DOVE_GE00_PHYS_BASE + 0x2000,
-		.end	= DOVE_GE00_PHYS_BASE + SZ_16K - 1,
-		.flags	= IORESOURCE_MEM,
-	},
-};
-
-static struct platform_device dove_ge00_shared = {
-	.name		= MV643XX_ETH_SHARED_NAME,
-	.id		= 0,
-	.dev		= {
-		.platform_data	= &dove_ge00_shared_data,
-	},
-	.num_resources	= 1,
-	.resource	= dove_ge00_shared_resources,
-};
-
-static struct resource dove_ge00_resources[] = {
-	{
-		.name	= "ge00 irq",
-		.start	= IRQ_DOVE_GE00_SUM,
-		.end	= IRQ_DOVE_GE00_SUM,
-		.flags	= IORESOURCE_IRQ,
-	},
-};
-
-static struct platform_device dove_ge00 = {
-	.name		= MV643XX_ETH_NAME,
-	.id		= 0,
-	.num_resources	= 1,
-	.resource	= dove_ge00_resources,
-	.dev		= {
-		.coherent_dma_mask	= 0xffffffff,
-	},
-};
-
 void __init dove_ge00_init(struct mv643xx_eth_platform_data *eth_data)
 {
-	eth_data->shared = &dove_ge00_shared;
-	dove_ge00.dev.platform_data = eth_data;
-
-	platform_device_register(&dove_ge00_shared);
-	platform_device_register(&dove_ge00);
+	orion_ge00_init(eth_data, DOVE_GE00_PHYS_BASE,
+			IRQ_DOVE_GE00_SUM, IRQ_DOVE_GE00_ERR,
+			1600);
 }
 
 /*****************************************************************************
  * SoC RTC
  ****************************************************************************/
-static struct resource dove_rtc_resource[] = {
-	{
-		.start	= DOVE_RTC_PHYS_BASE,
-		.end	= DOVE_RTC_PHYS_BASE + 32 - 1,
-		.flags	= IORESOURCE_MEM,
-	}, {
-		.start	= IRQ_DOVE_RTC,
-		.flags	= IORESOURCE_IRQ,
-	}
-};
-
 void __init dove_rtc_init(void)
 {
-	platform_device_register_simple("rtc-mv", -1, dove_rtc_resource, 2);
+	orion_rtc_init(DOVE_RTC_PHYS_BASE, IRQ_DOVE_RTC);
 }
 
 /*****************************************************************************
  * SATA
  ****************************************************************************/
-static struct resource dove_sata_resources[] = {
-	{
-		.name	= "sata base",
-		.start	= DOVE_SATA_PHYS_BASE,
-		.end	= DOVE_SATA_PHYS_BASE + 0x5000 - 1,
-		.flags	= IORESOURCE_MEM,
-	}, {
-		.name	= "sata irq",
-		.start	= IRQ_DOVE_SATA,
-		.end	= IRQ_DOVE_SATA,
-		.flags	= IORESOURCE_IRQ,
-	},
-};
-
-static struct platform_device dove_sata = {
-	.name		= "sata_mv",
-	.id		= 0,
-	.dev		= {
-		.coherent_dma_mask	= DMA_BIT_MASK(32),
-	},
-	.num_resources	= ARRAY_SIZE(dove_sata_resources),
-	.resource	= dove_sata_resources,
-};
-
 void __init dove_sata_init(struct mv_sata_platform_data *sata_data)
 {
-	sata_data->dram = &dove_mbus_dram_info;
-	dove_sata.dev.platform_data = sata_data;
-	platform_device_register(&dove_sata);
+	orion_sata_init(sata_data, DOVE_SATA_PHYS_BASE, IRQ_DOVE_SATA);
+
 }
 
 /*****************************************************************************
  * UART0
  ****************************************************************************/
-static struct plat_serial8250_port dove_uart0_data[] = {
-	{
-		.mapbase	= DOVE_UART0_PHYS_BASE,
-		.membase	= (char *)DOVE_UART0_VIRT_BASE,
-		.irq		= IRQ_DOVE_UART_0,
-		.flags		= UPF_SKIP_TEST | UPF_BOOT_AUTOCONF,
-		.iotype		= UPIO_MEM,
-		.regshift	= 2,
-		.uartclk	= 0,
-	}, {
-	},
-};
-
-static struct resource dove_uart0_resources[] = {
-	{
-		.start		= DOVE_UART0_PHYS_BASE,
-		.end		= DOVE_UART0_PHYS_BASE + SZ_256 - 1,
-		.flags		= IORESOURCE_MEM,
-	}, {
-		.start		= IRQ_DOVE_UART_0,
-		.end		= IRQ_DOVE_UART_0,
-		.flags		= IORESOURCE_IRQ,
-	},
-};
-
-static struct platform_device dove_uart0 = {
-	.name			= "serial8250",
-	.id			= 0,
-	.dev			= {
-		.platform_data	= dove_uart0_data,
-	},
-	.resource		= dove_uart0_resources,
-	.num_resources		= ARRAY_SIZE(dove_uart0_resources),
-};
-
 void __init dove_uart0_init(void)
 {
-	platform_device_register(&dove_uart0);
+	orion_uart0_init(DOVE_UART0_VIRT_BASE, DOVE_UART0_PHYS_BASE,
+			 IRQ_DOVE_UART_0, tclk);
 }
 
 /*****************************************************************************
  * UART1
  ****************************************************************************/
-static struct plat_serial8250_port dove_uart1_data[] = {
-	{
-		.mapbase	= DOVE_UART1_PHYS_BASE,
-		.membase	= (char *)DOVE_UART1_VIRT_BASE,
-		.irq		= IRQ_DOVE_UART_1,
-		.flags		= UPF_SKIP_TEST | UPF_BOOT_AUTOCONF,
-		.iotype		= UPIO_MEM,
-		.regshift	= 2,
-		.uartclk	= 0,
-	}, {
-	},
-};
-
-static struct resource dove_uart1_resources[] = {
-	{
-		.start		= DOVE_UART1_PHYS_BASE,
-		.end		= DOVE_UART1_PHYS_BASE + SZ_256 - 1,
-		.flags		= IORESOURCE_MEM,
-	}, {
-		.start		= IRQ_DOVE_UART_1,
-		.end		= IRQ_DOVE_UART_1,
-		.flags		= IORESOURCE_IRQ,
-	},
-};
-
-static struct platform_device dove_uart1 = {
-	.name			= "serial8250",
-	.id			= 1,
-	.dev			= {
-		.platform_data	= dove_uart1_data,
-	},
-	.resource		= dove_uart1_resources,
-	.num_resources		= ARRAY_SIZE(dove_uart1_resources),
-};
-
 void __init dove_uart1_init(void)
 {
-	platform_device_register(&dove_uart1);
+	orion_uart1_init(DOVE_UART1_VIRT_BASE, DOVE_UART1_PHYS_BASE,
+			 IRQ_DOVE_UART_1, tclk);
 }
 
 /*****************************************************************************
  * UART2
  ****************************************************************************/
-static struct plat_serial8250_port dove_uart2_data[] = {
-	{
-		.mapbase	= DOVE_UART2_PHYS_BASE,
-		.membase	= (char *)DOVE_UART2_VIRT_BASE,
-		.irq		= IRQ_DOVE_UART_2,
-		.flags		= UPF_SKIP_TEST | UPF_BOOT_AUTOCONF,
-		.iotype		= UPIO_MEM,
-		.regshift	= 2,
-		.uartclk	= 0,
-	}, {
-	},
-};
-
-static struct resource dove_uart2_resources[] = {
-	{
-		.start		= DOVE_UART2_PHYS_BASE,
-		.end		= DOVE_UART2_PHYS_BASE + SZ_256 - 1,
-		.flags		= IORESOURCE_MEM,
-	}, {
-		.start		= IRQ_DOVE_UART_2,
-		.end		= IRQ_DOVE_UART_2,
-		.flags		= IORESOURCE_IRQ,
-	},
-};
-
-static struct platform_device dove_uart2 = {
-	.name			= "serial8250",
-	.id			= 2,
-	.dev			= {
-		.platform_data	= dove_uart2_data,
-	},
-	.resource		= dove_uart2_resources,
-	.num_resources		= ARRAY_SIZE(dove_uart2_resources),
-};
-
 void __init dove_uart2_init(void)
 {
-	platform_device_register(&dove_uart2);
+	orion_uart2_init(DOVE_UART2_VIRT_BASE, DOVE_UART2_PHYS_BASE,
+			 IRQ_DOVE_UART_2, tclk);
 }
 
 /*****************************************************************************
  * UART3
  ****************************************************************************/
-static struct plat_serial8250_port dove_uart3_data[] = {
-	{
-		.mapbase	= DOVE_UART3_PHYS_BASE,
-		.membase	= (char *)DOVE_UART3_VIRT_BASE,
-		.irq		= IRQ_DOVE_UART_3,
-		.flags		= UPF_SKIP_TEST | UPF_BOOT_AUTOCONF,
-		.iotype		= UPIO_MEM,
-		.regshift	= 2,
-		.uartclk	= 0,
-	}, {
-	},
-};
-
-static struct resource dove_uart3_resources[] = {
-	{
-		.start		= DOVE_UART3_PHYS_BASE,
-		.end		= DOVE_UART3_PHYS_BASE + SZ_256 - 1,
-		.flags		= IORESOURCE_MEM,
-	}, {
-		.start		= IRQ_DOVE_UART_3,
-		.end		= IRQ_DOVE_UART_3,
-		.flags		= IORESOURCE_IRQ,
-	},
-};
-
-static struct platform_device dove_uart3 = {
-	.name			= "serial8250",
-	.id			= 3,
-	.dev			= {
-		.platform_data	= dove_uart3_data,
-	},
-	.resource		= dove_uart3_resources,
-	.num_resources		= ARRAY_SIZE(dove_uart3_resources),
-};
-
 void __init dove_uart3_init(void)
 {
-	platform_device_register(&dove_uart3);
+	orion_uart3_init(DOVE_UART3_VIRT_BASE, DOVE_UART3_PHYS_BASE,
+			 IRQ_DOVE_UART_3, tclk);
 }
 
 /*****************************************************************************
- * SPI0
+ * SPI
  ****************************************************************************/
-static struct orion_spi_info dove_spi0_data = {
-	.tclk		= 0,
-};
-
-static struct resource dove_spi0_resources[] = {
-	{
-		.start	= DOVE_SPI0_PHYS_BASE,
-		.end	= DOVE_SPI0_PHYS_BASE + SZ_512 - 1,
-		.flags	= IORESOURCE_MEM,
-	}, {
-		.start	= IRQ_DOVE_SPI0,
-		.end	= IRQ_DOVE_SPI0,
-		.flags	= IORESOURCE_IRQ,
-	},
-};
-
-static struct platform_device dove_spi0 = {
-	.name		= "orion_spi",
-	.id		= 0,
-	.resource	= dove_spi0_resources,
-	.dev		= {
-		.platform_data	= &dove_spi0_data,
-	},
-	.num_resources	= ARRAY_SIZE(dove_spi0_resources),
-};
-
 void __init dove_spi0_init(void)
 {
-	platform_device_register(&dove_spi0);
+	orion_spi_init(DOVE_SPI0_PHYS_BASE);
 }
-
-/*****************************************************************************
- * SPI1
- ****************************************************************************/
-static struct orion_spi_info dove_spi1_data = {
-	.tclk		= 0,
-};
-
-static struct resource dove_spi1_resources[] = {
-	{
-		.start	= DOVE_SPI1_PHYS_BASE,
-		.end	= DOVE_SPI1_PHYS_BASE + SZ_512 - 1,
-		.flags	= IORESOURCE_MEM,
-	}, {
-		.start	= IRQ_DOVE_SPI1,
-		.end	= IRQ_DOVE_SPI1,
-		.flags	= IORESOURCE_IRQ,
-	},
-};
-
-static struct platform_device dove_spi1 = {
-	.name		= "orion_spi",
-	.id		= 1,
-	.resource	= dove_spi1_resources,
-	.dev		= {
-		.platform_data	= &dove_spi1_data,
-	},
-	.num_resources	= ARRAY_SIZE(dove_spi1_resources),
-};
 
 void __init dove_spi1_init(void)
 {
-	platform_device_register(&dove_spi1);
+	orion_spi_1_init(DOVE_SPI1_PHYS_BASE);
 }
 
 /*****************************************************************************
  * I2C
  ****************************************************************************/
-static struct mv64xxx_i2c_pdata dove_i2c_data = {
-	.freq_m		= 10, /* assumes 166 MHz TCLK gets 94.3kHz */
-	.freq_n		= 3,
-	.timeout	= 1000, /* Default timeout of 1 second */
-};
-
-static struct resource dove_i2c_resources[] = {
-	{
-		.name	= "i2c base",
-		.start	= DOVE_I2C_PHYS_BASE,
-		.end	= DOVE_I2C_PHYS_BASE + 0x20 - 1,
-		.flags	= IORESOURCE_MEM,
-	}, {
-		.name	= "i2c irq",
-		.start	= IRQ_DOVE_I2C,
-		.end	= IRQ_DOVE_I2C,
-		.flags	= IORESOURCE_IRQ,
-	},
-};
-
-static struct platform_device dove_i2c = {
-	.name		= MV64XXX_I2C_CTLR_NAME,
-	.id		= 0,
-	.num_resources	= ARRAY_SIZE(dove_i2c_resources),
-	.resource	= dove_i2c_resources,
-	.dev		= {
-		.platform_data = &dove_i2c_data,
-	},
-};
-
 void __init dove_i2c_init(void)
 {
-	platform_device_register(&dove_i2c);
+	orion_i2c_init(DOVE_I2C_PHYS_BASE, IRQ_DOVE_I2C, 10);
 }
 
 /*****************************************************************************
  * Time handling
  ****************************************************************************/
-static int get_tclk(void)
+void __init dove_init_early(void)
 {
-	/* use DOVE_RESET_SAMPLE_HI/LO to detect tclk */
+	orion_time_set_base(TIMER_VIRT_BASE);
+	mvebu_mbus_init("marvell,dove-mbus",
+			BRIDGE_WINS_BASE, BRIDGE_WINS_SZ,
+			DOVE_MC_WINS_BASE, DOVE_MC_WINS_SZ, 0);
+}
+
+static int __init dove_find_tclk(void)
+{
 	return 166666667;
 }
 
-static void dove_timer_init(void)
+void __init dove_timer_init(void)
 {
-	orion_time_init(IRQ_DOVE_BRIDGE, get_tclk());
+	dove_tclk = dove_find_tclk();
+	orion_time_init(BRIDGE_VIRT_BASE, BRIDGE_INT_TIMER1_CLR,
+			IRQ_DOVE_BRIDGE, dove_tclk);
 }
 
-struct sys_timer dove_timer = {
-	.init = dove_timer_init,
-};
-
 /*****************************************************************************
- * XOR
+ * Cryptographic Engines and Security Accelerator (CESA)
  ****************************************************************************/
-static struct mv_xor_platform_shared_data dove_xor_shared_data = {
-	.dram		= &dove_mbus_dram_info,
-};
+void __init dove_crypto_init(void)
+{
+	orion_crypto_init(DOVE_CRYPT_PHYS_BASE, DOVE_CESA_PHYS_BASE,
+			  DOVE_CESA_SIZE, IRQ_DOVE_CRYPTO);
+}
 
 /*****************************************************************************
  * XOR 0
  ****************************************************************************/
-static u64 dove_xor0_dmamask = DMA_BIT_MASK(32);
-
-static struct resource dove_xor0_shared_resources[] = {
-	{
-		.name	= "xor 0 low",
-		.start	= DOVE_XOR0_PHYS_BASE,
-		.end	= DOVE_XOR0_PHYS_BASE + 0xff,
-		.flags	= IORESOURCE_MEM,
-	}, {
-		.name	= "xor 0 high",
-		.start	= DOVE_XOR0_HIGH_PHYS_BASE,
-		.end	= DOVE_XOR0_HIGH_PHYS_BASE + 0xff,
-		.flags	= IORESOURCE_MEM,
-	},
-};
-
-static struct platform_device dove_xor0_shared = {
-	.name		= MV_XOR_SHARED_NAME,
-	.id		= 0,
-	.dev		= {
-		.platform_data = &dove_xor_shared_data,
-	},
-	.num_resources	= ARRAY_SIZE(dove_xor0_shared_resources),
-	.resource	= dove_xor0_shared_resources,
-};
-
-static struct resource dove_xor00_resources[] = {
-	[0] = {
-		.start	= IRQ_DOVE_XOR_00,
-		.end	= IRQ_DOVE_XOR_00,
-		.flags	= IORESOURCE_IRQ,
-	},
-};
-
-static struct mv_xor_platform_data dove_xor00_data = {
-	.shared		= &dove_xor0_shared,
-	.hw_id		= 0,
-	.pool_size	= PAGE_SIZE,
-};
-
-static struct platform_device dove_xor00_channel = {
-	.name		= MV_XOR_NAME,
-	.id		= 0,
-	.num_resources	= ARRAY_SIZE(dove_xor00_resources),
-	.resource	= dove_xor00_resources,
-	.dev		= {
-		.dma_mask		= &dove_xor0_dmamask,
-		.coherent_dma_mask	= DMA_BIT_MASK(64),
-		.platform_data		= &dove_xor00_data,
-	},
-};
-
-static struct resource dove_xor01_resources[] = {
-	[0] = {
-		.start	= IRQ_DOVE_XOR_01,
-		.end	= IRQ_DOVE_XOR_01,
-		.flags	= IORESOURCE_IRQ,
-	},
-};
-
-static struct mv_xor_platform_data dove_xor01_data = {
-	.shared		= &dove_xor0_shared,
-	.hw_id		= 1,
-	.pool_size	= PAGE_SIZE,
-};
-
-static struct platform_device dove_xor01_channel = {
-	.name		= MV_XOR_NAME,
-	.id		= 1,
-	.num_resources	= ARRAY_SIZE(dove_xor01_resources),
-	.resource	= dove_xor01_resources,
-	.dev		= {
-		.dma_mask		= &dove_xor0_dmamask,
-		.coherent_dma_mask	= DMA_BIT_MASK(64),
-		.platform_data		= &dove_xor01_data,
-	},
-};
-
 void __init dove_xor0_init(void)
 {
-	platform_device_register(&dove_xor0_shared);
-
-	/*
-	 * two engines can't do memset simultaneously, this limitation
-	 * satisfied by removing memset support from one of the engines.
-	 */
-	dma_cap_set(DMA_MEMCPY, dove_xor00_data.cap_mask);
-	dma_cap_set(DMA_XOR, dove_xor00_data.cap_mask);
-	platform_device_register(&dove_xor00_channel);
-
-	dma_cap_set(DMA_MEMCPY, dove_xor01_data.cap_mask);
-	dma_cap_set(DMA_MEMSET, dove_xor01_data.cap_mask);
-	dma_cap_set(DMA_XOR, dove_xor01_data.cap_mask);
-	platform_device_register(&dove_xor01_channel);
+	orion_xor0_init(DOVE_XOR0_PHYS_BASE, DOVE_XOR0_HIGH_PHYS_BASE,
+			IRQ_DOVE_XOR_00, IRQ_DOVE_XOR_01);
 }
 
 /*****************************************************************************
  * XOR 1
  ****************************************************************************/
-static u64 dove_xor1_dmamask = DMA_BIT_MASK(32);
-
-static struct resource dove_xor1_shared_resources[] = {
-	{
-		.name	= "xor 0 low",
-		.start	= DOVE_XOR1_PHYS_BASE,
-		.end	= DOVE_XOR1_PHYS_BASE + 0xff,
-		.flags	= IORESOURCE_MEM,
-	}, {
-		.name	= "xor 0 high",
-		.start	= DOVE_XOR1_HIGH_PHYS_BASE,
-		.end	= DOVE_XOR1_HIGH_PHYS_BASE + 0xff,
-		.flags	= IORESOURCE_MEM,
-	},
-};
-
-static struct platform_device dove_xor1_shared = {
-	.name		= MV_XOR_SHARED_NAME,
-	.id		= 1,
-	.dev		= {
-		.platform_data = &dove_xor_shared_data,
-	},
-	.num_resources	= ARRAY_SIZE(dove_xor1_shared_resources),
-	.resource	= dove_xor1_shared_resources,
-};
-
-static struct resource dove_xor10_resources[] = {
-	[0] = {
-		.start	= IRQ_DOVE_XOR_10,
-		.end	= IRQ_DOVE_XOR_10,
-		.flags	= IORESOURCE_IRQ,
-	},
-};
-
-static struct mv_xor_platform_data dove_xor10_data = {
-	.shared		= &dove_xor1_shared,
-	.hw_id		= 0,
-	.pool_size	= PAGE_SIZE,
-};
-
-static struct platform_device dove_xor10_channel = {
-	.name		= MV_XOR_NAME,
-	.id		= 2,
-	.num_resources	= ARRAY_SIZE(dove_xor10_resources),
-	.resource	= dove_xor10_resources,
-	.dev		= {
-		.dma_mask		= &dove_xor1_dmamask,
-		.coherent_dma_mask	= DMA_BIT_MASK(64),
-		.platform_data		= &dove_xor10_data,
-	},
-};
-
-static struct resource dove_xor11_resources[] = {
-	[0] = {
-		.start	= IRQ_DOVE_XOR_11,
-		.end	= IRQ_DOVE_XOR_11,
-		.flags	= IORESOURCE_IRQ,
-	},
-};
-
-static struct mv_xor_platform_data dove_xor11_data = {
-	.shared		= &dove_xor1_shared,
-	.hw_id		= 1,
-	.pool_size	= PAGE_SIZE,
-};
-
-static struct platform_device dove_xor11_channel = {
-	.name		= MV_XOR_NAME,
-	.id		= 3,
-	.num_resources	= ARRAY_SIZE(dove_xor11_resources),
-	.resource	= dove_xor11_resources,
-	.dev		= {
-		.dma_mask		= &dove_xor1_dmamask,
-		.coherent_dma_mask	= DMA_BIT_MASK(64),
-		.platform_data		= &dove_xor11_data,
-	},
-};
-
 void __init dove_xor1_init(void)
 {
-	platform_device_register(&dove_xor1_shared);
+	orion_xor1_init(DOVE_XOR1_PHYS_BASE, DOVE_XOR1_HIGH_PHYS_BASE,
+			IRQ_DOVE_XOR_10, IRQ_DOVE_XOR_11);
+}
 
+/*****************************************************************************
+ * SDIO
+ ****************************************************************************/
+static u64 sdio_dmamask = DMA_BIT_MASK(32);
+
+static struct resource dove_sdio0_resources[] = {
+	{
+		.start	= DOVE_SDIO0_PHYS_BASE,
+		.end	= DOVE_SDIO0_PHYS_BASE + 0xff,
+		.flags	= IORESOURCE_MEM,
+	}, {
+		.start	= IRQ_DOVE_SDIO0,
+		.end	= IRQ_DOVE_SDIO0,
+		.flags	= IORESOURCE_IRQ,
+	},
+};
+
+static struct platform_device dove_sdio0 = {
+	.name		= "sdhci-dove",
+	.id		= 0,
+	.dev		= {
+		.dma_mask		= &sdio_dmamask,
+		.coherent_dma_mask	= DMA_BIT_MASK(32),
+	},
+	.resource	= dove_sdio0_resources,
+	.num_resources	= ARRAY_SIZE(dove_sdio0_resources),
+};
+
+void __init dove_sdio0_init(void)
+{
+	platform_device_register(&dove_sdio0);
+}
+
+static struct resource dove_sdio1_resources[] = {
+	{
+		.start	= DOVE_SDIO1_PHYS_BASE,
+		.end	= DOVE_SDIO1_PHYS_BASE + 0xff,
+		.flags	= IORESOURCE_MEM,
+	}, {
+		.start	= IRQ_DOVE_SDIO1,
+		.end	= IRQ_DOVE_SDIO1,
+		.flags	= IORESOURCE_IRQ,
+	},
+};
+
+static struct platform_device dove_sdio1 = {
+	.name		= "sdhci-dove",
+	.id		= 1,
+	.dev		= {
+		.dma_mask		= &sdio_dmamask,
+		.coherent_dma_mask	= DMA_BIT_MASK(32),
+	},
+	.resource	= dove_sdio1_resources,
+	.num_resources	= ARRAY_SIZE(dove_sdio1_resources),
+};
+
+void __init dove_sdio1_init(void)
+{
+	platform_device_register(&dove_sdio1);
+}
+
+void __init dove_setup_cpu_wins(void)
+{
 	/*
-	 * two engines can't do memset simultaneously, this limitation
-	 * satisfied by removing memset support from one of the engines.
+	 * The PCIe windows will no longer be statically allocated
+	 * here once Dove is migrated to the pci-mvebu driver.
 	 */
-	dma_cap_set(DMA_MEMCPY, dove_xor10_data.cap_mask);
-	dma_cap_set(DMA_XOR, dove_xor10_data.cap_mask);
-	platform_device_register(&dove_xor10_channel);
-
-	dma_cap_set(DMA_MEMCPY, dove_xor11_data.cap_mask);
-	dma_cap_set(DMA_MEMSET, dove_xor11_data.cap_mask);
-	dma_cap_set(DMA_XOR, dove_xor11_data.cap_mask);
-	platform_device_register(&dove_xor11_channel);
+	mvebu_mbus_add_window_remap_flags("pcie0.0",
+					  DOVE_PCIE0_IO_PHYS_BASE,
+					  DOVE_PCIE0_IO_SIZE,
+					  DOVE_PCIE0_IO_BUS_BASE,
+					  MVEBU_MBUS_PCI_IO);
+	mvebu_mbus_add_window_remap_flags("pcie1.0",
+					  DOVE_PCIE1_IO_PHYS_BASE,
+					  DOVE_PCIE1_IO_SIZE,
+					  DOVE_PCIE1_IO_BUS_BASE,
+					  MVEBU_MBUS_PCI_IO);
+	mvebu_mbus_add_window_remap_flags("pcie0.0",
+					  DOVE_PCIE0_MEM_PHYS_BASE,
+					  DOVE_PCIE0_MEM_SIZE,
+					  MVEBU_MBUS_NO_REMAP,
+					  MVEBU_MBUS_PCI_MEM);
+	mvebu_mbus_add_window_remap_flags("pcie1.0",
+					  DOVE_PCIE1_MEM_PHYS_BASE,
+					  DOVE_PCIE1_MEM_SIZE,
+					  MVEBU_MBUS_NO_REMAP,
+					  MVEBU_MBUS_PCI_MEM);
+	mvebu_mbus_add_window("cesa", DOVE_CESA_PHYS_BASE,
+			      DOVE_CESA_SIZE);
+	mvebu_mbus_add_window("bootrom", DOVE_BOOTROM_PHYS_BASE,
+			      DOVE_BOOTROM_SIZE);
+	mvebu_mbus_add_window("scratchpad", DOVE_SCRATCHPAD_PHYS_BASE,
+			      DOVE_SCRATCHPAD_SIZE);
 }
 
 void __init dove_init(void)
 {
-	int tclk;
-
-	tclk = get_tclk();
-
-	printk(KERN_INFO "Dove 88AP510 SoC, ");
-	printk(KERN_INFO "TCLK = %dMHz\n", (tclk + 499999) / 1000000);
+	pr_info("Dove 88AP510 SoC, TCLK = %d MHz.\n",
+		(dove_tclk + 499999) / 1000000);
 
 #ifdef CONFIG_CACHE_TAUROS2
-	tauros2_init();
+	tauros2_init(0);
 #endif
-	dove_setup_cpu_mbus();
+	dove_setup_cpu_wins();
 
-	dove_ge00_shared_data.t_clk = tclk;
-	dove_uart0_data[0].uartclk = tclk;
-	dove_uart1_data[0].uartclk = tclk;
-	dove_uart2_data[0].uartclk = tclk;
-	dove_uart3_data[0].uartclk = tclk;
-	dove_spi0_data.tclk = tclk;
-	dove_spi1_data.tclk = tclk;
+	/* Setup root of clk tree */
+	dove_clk_init();
 
 	/* internal devices that every board has */
 	dove_rtc_init();
 	dove_xor0_init();
 	dove_xor1_init();
+}
+
+void dove_restart(enum reboot_mode mode, const char *cmd)
+{
+	/*
+	 * Enable soft reset to assert RSTOUTn.
+	 */
+	writel(SOFT_RESET_OUT_EN, RSTOUTn_MASK);
+
+	/*
+	 * Assert soft reset.
+	 */
+	writel(SOFT_RESET, SYSTEM_SOFT_RESET);
+
+	while (1)
+		;
 }

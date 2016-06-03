@@ -24,7 +24,7 @@
 /* Highest syscall used of any syscall flavour */
 #define MAX_SYSCALL_NO	__NR_O32_Linux + __NR_O32_Linux_syscalls
 
-	.align  5
+	.align	5
 NESTED(handle_sys, PT_SIZE, sp)
 	.set	noat
 	SAVE_SOME
@@ -52,9 +52,9 @@ NESTED(handle_sys, PT_SIZE, sp)
 
 stack_done:
 	lw	t0, TI_FLAGS($28)	# syscall tracing enabled?
-	li	t1, _TIF_SYSCALL_TRACE | _TIF_SYSCALL_AUDIT
+	li	t1, _TIF_WORK_SYSCALL_ENTRY
 	and	t0, t1
-	bnez	t0, syscall_trace_entry	# -> yes
+	bnez	t0, syscall_trace_entry # -> yes
 
 	jalr	t2			# Do The Real Thing (TM)
 
@@ -63,24 +63,13 @@ stack_done:
 	sw	t0, PT_R7(sp)		# set error flag
 	beqz	t0, 1f
 
+	lw	t1, PT_R2(sp)		# syscall number
 	negu	v0			# error
-	sw	v0, PT_R0(sp)		# set flag for syscall
-					# restarting
+	sw	t1, PT_R0(sp)		# save it for syscall restarting
 1:	sw	v0, PT_R2(sp)		# result
 
 o32_syscall_exit:
-	local_irq_disable		# make sure need_resched and
-					# signals dont change between
-					# sampling and return
-	lw	a2, TI_FLAGS($28)	# current->work
-	li	t0, _TIF_ALLWORK_MASK
-	and	t0, a2
-	bnez	t0, o32_syscall_exit_work
-
-	j	restore_partial
-
-o32_syscall_exit_work:
-	j	syscall_exit_work_partial
+	j	syscall_exit_partial
 
 /* ------------------------------------------------------------------------ */
 
@@ -88,8 +77,7 @@ syscall_trace_entry:
 	SAVE_STATIC
 	move	s0, t2
 	move	a0, sp
-	li	a1, 0
-	jal	do_syscall_trace
+	jal	syscall_trace_enter
 
 	move	t0, s0
 	RESTORE_STATIC
@@ -104,9 +92,9 @@ syscall_trace_entry:
 	sw	t0, PT_R7(sp)		# set error flag
 	beqz	t0, 1f
 
+	lw	t1, PT_R2(sp)		# syscall number
 	negu	v0			# error
-	sw	v0, PT_R0(sp)		# set flag for syscall
-					# restarting
+	sw	t1, PT_R0(sp)		# save it for syscall restarting
 1:	sw	v0, PT_R2(sp)		# result
 
 	j	syscall_exit
@@ -138,8 +126,8 @@ stackargs:
 	la	t1, 5f			# load up to 3 arguments
 	subu	t1, t3
 1:	lw	t5, 16(t0)		# argument #5 from usp
-	.set    push
-	.set    noreorder
+	.set	push
+	.set	noreorder
 	.set	nomacro
 	jr	t1
 	 addiu	t1, 6f - 5f
@@ -150,9 +138,18 @@ stackargs:
 5:	jr	t1
 	 sw	t5, 16(sp)		# argument #5 to ksp
 
+#ifdef CONFIG_CPU_MICROMIPS
+	sw	t8, 28(sp)		# argument #8 to ksp
+	nop
+	sw	t7, 24(sp)		# argument #7 to ksp
+	nop
+	sw	t6, 20(sp)		# argument #6 to ksp
+	nop
+#else
 	sw	t8, 28(sp)		# argument #8 to ksp
 	sw	t7, 24(sp)		# argument #7 to ksp
 	sw	t6, 20(sp)		# argument #6 to ksp
+#endif
 6:	j	stack_done		# go back
 	 nop
 	.set	pop
@@ -169,8 +166,7 @@ stackargs:
 	 * We probably should handle this case a bit more drastic.
 	 */
 bad_stack:
-	negu	v0				# error
-	sw	v0, PT_R0(sp)
+	li	v0, EFAULT
 	sw	v0, PT_R2(sp)
 	li	t0, 1				# set error flag
 	sw	t0, PT_R7(sp)
@@ -218,7 +214,7 @@ illegal_syscall:
 	jr	t2
 	/* Unreached */
 
-einval:	li	v0, -ENOSYS
+einval: li	v0, -ENOSYS
 	jr	ra
 	END(sys_syscall)
 
@@ -239,7 +235,7 @@ einval:	li	v0, -ENOSYS
 	.macro	syscalltable
 	sys	sys_syscall		8	/* 4000 */
 	sys	sys_exit		1
-	sys	sys_fork		0
+	sys	__sys_fork		0
 	sys	sys_read		3
 	sys	sys_write		3
 	sys	sys_open		3	/* 4005 */
@@ -357,7 +353,7 @@ einval:	li	v0, -ENOSYS
 	sys	sys_ipc			6
 	sys	sys_fsync		1
 	sys	sys_sigreturn		0
-	sys	sys_clone		0	/* 4120 */
+	sys	__sys_clone		6	/* 4120 */
 	sys	sys_setdomainname	2
 	sys	sys_newuname		1
 	sys	sys_ni_syscall		0	/* sys_modify_ldt */
@@ -367,7 +363,7 @@ einval:	li	v0, -ENOSYS
 	sys	sys_ni_syscall		0	/* was create_module */
 	sys	sys_init_module		5
 	sys	sys_delete_module	1
-	sys	sys_ni_syscall		0	/* 4130	was get_kernel_syms */
+	sys	sys_ni_syscall		0	/* 4130 was get_kernel_syms */
 	sys	sys_quotactl		4
 	sys	sys_getpgid		1
 	sys	sys_fchdir		1
@@ -426,7 +422,7 @@ einval:	li	v0, -ENOSYS
 	sys	sys_getresuid		3
 	sys	sys_ni_syscall		0	/* was sys_query_module */
 	sys	sys_poll		3
-	sys	sys_nfsservctl		3
+	sys	sys_ni_syscall		0	/* was nfsservctl */
 	sys	sys_setresgid		3	/* 4190 */
 	sys	sys_getresgid		3
 	sys	sys_prctl		5
@@ -498,7 +494,7 @@ einval:	li	v0, -ENOSYS
 	sys	sys_lookup_dcookie	4
 	sys	sys_epoll_create	1
 	sys	sys_epoll_ctl		4
-	sys	sys_epoll_wait		3	/* 4250 */
+	sys	sys_epoll_wait		4	/* 4250 */
 	sys	sys_remap_file_pages	5
 	sys	sys_set_tid_address	1
 	sys	sys_restart_syscall	0
@@ -566,7 +562,7 @@ einval:	li	v0, -ENOSYS
 	sys	sys_ioprio_get		2	/* 4315 */
 	sys	sys_utimensat		4
 	sys	sys_signalfd		3
-	sys	sys_ni_syscall		0
+	sys	sys_ni_syscall		0	/* was timerfd */
 	sys	sys_eventfd		1
 	sys	sys_fallocate		6	/* 4320 */
 	sys	sys_timerfd_create	2
@@ -583,13 +579,26 @@ einval:	li	v0, -ENOSYS
 	sys	sys_rt_tgsigqueueinfo	4
 	sys	sys_perf_event_open	5
 	sys	sys_accept4		4
-	sys     sys_recvmmsg            5
+	sys	sys_recvmmsg		5	/* 4335 */
+	sys	sys_fanotify_init	2
+	sys	sys_fanotify_mark	6
+	sys	sys_prlimit64		4
+	sys	sys_name_to_handle_at	5
+	sys	sys_open_by_handle_at	3	/* 4340 */
+	sys	sys_clock_adjtime	2
+	sys	sys_syncfs		1
+	sys	sys_sendmmsg		4
+	sys	sys_setns		2
+	sys	sys_process_vm_readv	6	/* 4345 */
+	sys	sys_process_vm_writev	6
+	sys	sys_kcmp		5
+	sys	sys_finit_module	3
 	.endm
 
 	/* We pre-compute the number of _instruction_ bytes needed to
 	   load or store the arguments 6-8. Negative values are ignored. */
 
-	.macro  sys function, nargs
+	.macro	sys function, nargs
 	PTR	\function
 	LONG	(\nargs << 2) - (5 << 2)
 	.endm

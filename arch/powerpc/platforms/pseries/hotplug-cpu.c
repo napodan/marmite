@@ -19,26 +19,22 @@
  */
 
 #include <linux/kernel.h>
+#include <linux/interrupt.h>
 #include <linux/delay.h>
+#include <linux/sched.h>	/* for idle_task_exit */
 #include <linux/cpu.h>
-#include <asm/system.h>
+#include <linux/of.h>
 #include <asm/prom.h>
 #include <asm/rtas.h>
 #include <asm/firmware.h>
 #include <asm/machdep.h>
 #include <asm/vdso_datapage.h>
-#include <asm/pSeries_reconfig.h>
-#include "xics.h"
+#include <asm/xics.h>
 #include "plpar_wrappers.h"
 #include "offline_states.h"
 
 /* This version can't take the spinlock, because it never returns */
-static struct rtas_args rtas_stop_self_args = {
-	.token = RTAS_UNKNOWN_SERVICE,
-	.nargs = 0,
-	.nret = 1,
-	.rets = &rtas_stop_self_args.args[0],
-};
+static int rtas_stop_self_token = RTAS_UNKNOWN_SERVICE;
 
 static DEFINE_PER_CPU(enum cpu_state_vals, preferred_offline_state) =
 							CPU_STATE_OFFLINE;
@@ -91,15 +87,20 @@ void set_default_offline_state(int cpu)
 
 static void rtas_stop_self(void)
 {
-	struct rtas_args *args = &rtas_stop_self_args;
+	struct rtas_args args = {
+		.token = cpu_to_be32(rtas_stop_self_token),
+		.nargs = 0,
+		.nret = 1,
+		.rets = &args.args[0],
+	};
 
 	local_irq_disable();
 
-	BUG_ON(args->token == RTAS_UNKNOWN_SERVICE);
+	BUG_ON(rtas_stop_self_token == RTAS_UNKNOWN_SERVICE);
 
 	printk("cpu %u (hwid %u) Ready to die...\n",
 	       smp_processor_id(), hard_smp_processor_id());
-	enter_rtas(__pa(args));
+	enter_rtas(__pa(&args));
 
 	panic("Alas, I survived.\n");
 }
@@ -116,6 +117,9 @@ static void pseries_mach_cpu_die(void)
 
 	if (get_preferred_offline_state(cpu) == CPU_STATE_INACTIVE) {
 		set_cpu_current_state(cpu, CPU_STATE_INACTIVE);
+		if (ppc_md.suspend_disable_cpu)
+			ppc_md.suspend_disable_cpu();
+
 		cede_latency_hint = 2;
 
 		get_lppaca()->idle = 1;
@@ -123,16 +127,24 @@ static void pseries_mach_cpu_die(void)
 			get_lppaca()->donate_dedicated_cpu = 1;
 
 		while (get_preferred_offline_state(cpu) == CPU_STATE_INACTIVE) {
+			while (!prep_irq_for_idle()) {
+				local_irq_enable();
+				local_irq_disable();
+			}
+
 			extended_cede_processor(cede_latency_hint);
 		}
+
+		local_irq_disable();
 
 		if (!get_lppaca()->shared_proc)
 			get_lppaca()->donate_dedicated_cpu = 0;
 		get_lppaca()->idle = 0;
 
 		if (get_preferred_offline_state(cpu) == CPU_STATE_ONLINE) {
-			unregister_slb_shadow(hwcpu, __pa(get_slb_shadow()));
+			unregister_slb_shadow(hwcpu);
 
+			hard_irq_disable();
 			/*
 			 * Call to start_secondary_resume() will not return.
 			 * Kernel stack will be reset and start_secondary()
@@ -146,7 +158,7 @@ static void pseries_mach_cpu_die(void)
 	WARN_ON(get_preferred_offline_state(cpu) != CPU_STATE_OFFLINE);
 
 	set_cpu_current_state(cpu, CPU_STATE_OFFLINE);
-	unregister_slb_shadow(hwcpu, __pa(get_slb_shadow()));
+	unregister_slb_shadow(hwcpu);
 	rtas_stop_self();
 
 	/* Should never get here... */
@@ -190,12 +202,12 @@ static void pseries_cpu_die(unsigned int cpu)
 
 	if (get_preferred_offline_state(cpu) == CPU_STATE_INACTIVE) {
 		cpu_status = 1;
-		for (tries = 0; tries < 1000; tries++) {
+		for (tries = 0; tries < 5000; tries++) {
 			if (get_cpu_current_state(cpu) == CPU_STATE_INACTIVE) {
 				cpu_status = 0;
 				break;
 			}
-			cpu_relax();
+			msleep(1);
 		}
 	} else if (get_preferred_offline_state(cpu) == CPU_STATE_OFFLINE) {
 
@@ -213,7 +225,7 @@ static void pseries_cpu_die(unsigned int cpu)
 		       cpu, pcpu, cpu_status);
 	}
 
-	/* Isolation and deallocation are definatly done by
+	/* Isolation and deallocation are definitely done by
 	 * drslot_chrp_cpu.  If they were not they would be
 	 * done here.  Change isolate state to Isolate and
 	 * change allocation-state to Unusable.
@@ -277,7 +289,7 @@ static int pseries_add_processor(struct device_node *np)
 	}
 
 	for_each_cpu(cpu, tmp) {
-		BUG_ON(cpumask_test_cpu(cpu, cpu_present_mask));
+		BUG_ON(cpu_present(cpu));
 		set_cpu_present(cpu, true);
 		set_hard_smp_processor_id(cpu, *intserv++);
 	}
@@ -326,21 +338,17 @@ static void pseries_remove_processor(struct device_node *np)
 static int pseries_smp_notifier(struct notifier_block *nb,
 				unsigned long action, void *node)
 {
-	int err = NOTIFY_OK;
+	int err = 0;
 
 	switch (action) {
-	case PSERIES_RECONFIG_ADD:
-		if (pseries_add_processor(node))
-			err = NOTIFY_BAD;
+	case OF_RECONFIG_ATTACH_NODE:
+		err = pseries_add_processor(node);
 		break;
-	case PSERIES_RECONFIG_REMOVE:
+	case OF_RECONFIG_DETACH_NODE:
 		pseries_remove_processor(node);
 		break;
-	default:
-		err = NOTIFY_DONE;
-		break;
 	}
-	return err;
+	return notifier_from_errno(err);
 }
 
 static struct notifier_block pseries_smp_nb = {
@@ -383,10 +391,10 @@ static int __init pseries_cpu_hotplug_init(void)
 		}
 	}
 
-	rtas_stop_self_args.token = rtas_token("stop-self");
+	rtas_stop_self_token = rtas_token("stop-self");
 	qcss_tok = rtas_token("query-cpu-stopped-state");
 
-	if (rtas_stop_self_args.token == RTAS_UNKNOWN_SERVICE ||
+	if (rtas_stop_self_token == RTAS_UNKNOWN_SERVICE ||
 			qcss_tok == RTAS_UNKNOWN_SERVICE) {
 		printk(KERN_INFO "CPU Hotplug not supported by firmware "
 				"- disabling.\n");
@@ -399,7 +407,7 @@ static int __init pseries_cpu_hotplug_init(void)
 
 	/* Processors can be added/removed only on LPAR */
 	if (firmware_has_feature(FW_FEATURE_LPAR)) {
-		pSeries_reconfig_notifier_register(&pseries_smp_nb);
+		of_reconfig_notifier_register(&pseries_smp_nb);
 		cpu_maps_update_begin();
 		if (cede_offline_enabled && parse_cede_parameters() == 0) {
 			default_offline_state = CPU_STATE_INACTIVE;

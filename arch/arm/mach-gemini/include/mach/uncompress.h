@@ -16,7 +16,7 @@
 #include <linux/serial_reg.h>
 #include <mach/hardware.h>
 
-static volatile unsigned long *UART = (unsigned long *)GEMINI_UART_BASE;
+static volatile unsigned long * const UART = (unsigned long *)GEMINI_UART_BASE;
 
 /*
  * The following code assumes the serial port has already been
@@ -38,7 +38,5 @@ static inline void flush(void)
  * nothing to do
  */
 #define arch_decomp_setup()
-
-#define arch_decomp_wdog()
 
 #endif /* __MACH_UNCOMPRESS_H */

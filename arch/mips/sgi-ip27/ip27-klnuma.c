@@ -54,10 +54,7 @@ void __init setup_replication_mask(void)
 
 static __init void set_ktext_source(nasid_t client_nasid, nasid_t server_nasid)
 {
-	cnodeid_t client_cnode;
 	kern_vars_t *kvp;
-
-	client_cnode = NASID_TO_COMPACT_NODEID(client_nasid);
 
 	kvp = &hub_data(client_nasid)->kern_vars;
 
@@ -117,7 +114,7 @@ void __init replicate_kernel_text()
  * data structures on the first couple of pages of the first slot of each
  * node. If this is the case, getfirstfree(node) > getslotstart(node, 0).
  */
-pfn_t node_getfirstfree(cnodeid_t cnode)
+unsigned long node_getfirstfree(cnodeid_t cnode)
 {
 	unsigned long loadbase = REP_BASE;
 	nasid_t nasid = COMPACT_TO_NASID_NODEID(cnode);

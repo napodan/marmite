@@ -12,10 +12,11 @@
 #include <linux/sched.h>
 #include <linux/string.h>
 #include <linux/errno.h>
-#include <asm/vac-ops.h>
 #endif
 
 #ifndef __ASSEMBLY__
+
+#include <asm/processor.h>
 
 #define ARCH_HAS_SORT_EXTABLE
 #define ARCH_HAS_SEARCH_EXTABLE
@@ -260,23 +261,8 @@ static inline unsigned long __copy_to_user(void __user *to, const void *from, un
 	return __copy_user(to, (__force void __user *) from, n);
 }
 
-extern void copy_from_user_overflow(void)
-#ifdef CONFIG_DEBUG_STRICT_USER_COPY_CHECKS
-	__compiletime_error("copy_from_user() buffer size is not provably correct")
-#else
-	__compiletime_warning("copy_from_user() buffer size is not provably correct")
-#endif
-;
-
 static inline unsigned long copy_from_user(void *to, const void __user *from, unsigned long n)
 {
-	int sz = __compiletime_object_size(to);
-
-	if (unlikely(sz != -1 && sz < n)) {
-		copy_from_user_overflow();
-		return n;
-	}
-
 	if (n && __access_ok((unsigned long) from, n))
 		return __copy_user((__force void __user *) to, from, n);
 	else
@@ -320,34 +306,8 @@ static inline unsigned long clear_user(void __user *addr, unsigned long n)
 		return n;
 }
 
-extern long __strncpy_from_user(char *dest, const char __user *src, long count);
-
-static inline long strncpy_from_user(char *dest, const char __user *src, long count)
-{
-	if (__access_ok((unsigned long) src, count))
-		return __strncpy_from_user(dest, src, count);
-	else
-		return -EFAULT;
-}
-
-extern long __strlen_user(const char __user *);
-extern long __strnlen_user(const char __user *, long len);
-
-static inline long strlen_user(const char __user *str)
-{
-	if (!access_ok(VERIFY_READ, str, 0))
-		return 0;
-	else
-		return __strlen_user(str);
-}
-
-static inline long strnlen_user(const char __user *str, long len)
-{
-	if (!access_ok(VERIFY_READ, str, 0))
-		return 0;
-	else
-		return __strnlen_user(str, len);
-}
+extern __must_check long strlen_user(const char __user *str);
+extern __must_check long strnlen_user(const char __user *str, long n);
 
 #endif  /* __ASSEMBLY__ */
 

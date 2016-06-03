@@ -14,8 +14,6 @@
 #ifndef __AMS_DELTA_FIQ_H
 #define __AMS_DELTA_FIQ_H
 
-#include <plat/irqs.h>
-
 /*
  * Interrupt number used for passing control from FIQ to IRQ.
  * IRQ12, described as reserved, has been selected.
@@ -31,7 +29,7 @@
 #endif
 
 /*
- * These are the offsets from the begining of the fiq_buffer. They are put here
+ * These are the offsets from the beginning of the fiq_buffer. They are put here
  * since the buffer and header need to be accessed by drivers servicing devices
  * which generate GPIO interrupts - e.g. keyboard, modem, hook switch.
  */

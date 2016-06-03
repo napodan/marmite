@@ -17,22 +17,31 @@
  */
 
 #include <linux/serial_reg.h>
+
+#include <mach/serial.h>
+
 #define UART_SHIFT	2
 
-		.macro addruart, rx, tmp
-		mrc	p15, 0, \rx, c1, c0
-		tst	\rx, #1			@ MMU enabled?
-		moveq	\rx, #0x01000000	@ physical base address
-		movne	\rx, #0xfe000000	@ virtual base
-#if defined(CONFIG_ARCH_DAVINCI_DA8XX) && defined(CONFIG_ARCH_DAVINCI_DMx)
-#error Cannot enable DaVinci and DA8XX platforms concurrently
-#elif defined(CONFIG_MACH_DAVINCI_DA830_EVM) || \
-	defined(CONFIG_MACH_DAVINCI_DA850_EVM)
-		orr	\rx, \rx, #0x00d00000	@ physical base address
-		orr	\rx, \rx, #0x0000d000	@ of UART 2
+#if defined(CONFIG_DEBUG_DAVINCI_DMx_UART0)
+#define UART_BASE	DAVINCI_UART0_BASE
+#elif defined(CONFIG_DEBUG_DAVINCI_DA8XX_UART1)
+#define UART_BASE	DA8XX_UART1_BASE
+#elif defined(CONFIG_DEBUG_DAVINCI_DA8XX_UART2)
+#define UART_BASE	DA8XX_UART2_BASE
+#elif defined(CONFIG_DEBUG_DAVINCI_TNETV107X_UART1)
+#define UART_BASE	TNETV107X_UART2_BASE
+#define UART_VIRTBASE	TNETV107X_UART2_VIRT
 #else
-		orr	\rx, \rx, #0x00c20000   @ UART 0
+#error "Select a specifc port for DEBUG_LL"
 #endif
+
+#ifndef UART_VIRTBASE
+#define UART_VIRTBASE	IO_ADDRESS(UART_BASE)
+#endif
+
+		.macro addruart, rp, rv, tmp
+		ldr	\rp, =UART_BASE
+		ldr	\rv, =UART_VIRTBASE
 		.endm
 
 		.macro	senduart,rd,rx

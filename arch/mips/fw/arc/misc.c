@@ -5,19 +5,19 @@
  *
  * Miscellaneous ARCS PROM routines.
  *
- * Copyright (C) 1996 David S. Miller (dm@engr.sgi.com)
+ * Copyright (C) 1996 David S. Miller (davem@davemloft.net)
  * Copyright (C) 1999 Ralf Baechle (ralf@gnu.org)
  * Copyright (C) 1999 Silicon Graphics, Inc.
  */
 #include <linux/init.h>
 #include <linux/kernel.h>
+#include <linux/irqflags.h>
 
 #include <asm/bcache.h>
 
 #include <asm/fw/arc/types.h>
 #include <asm/sgialib.h>
 #include <asm/bootinfo.h>
-#include <asm/system.h>
 
 VOID
 ArcHalt(VOID)

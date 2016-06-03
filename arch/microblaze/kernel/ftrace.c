@@ -35,21 +35,24 @@ void prepare_ftrace_return(unsigned long *parent, unsigned long self_addr)
 	 * happen. This tool is too much intrusive to
 	 * ignore such a protection.
 	 */
-	asm volatile("	1:	lwi	%0, %2, 0;		\
-			2:	swi	%3, %2, 0;		\
-				addik	%1, r0, 0;		\
-			3:					\
-				.section .fixup, \"ax\";	\
-			4:	brid	3b;			\
-				addik	%1, r0, 1;		\
-				.previous;			\
-				.section __ex_table,\"a\";	\
-				.word	1b,4b;			\
-				.word	2b,4b;			\
-				.previous;"			\
+	asm volatile("	1:	lwi	%0, %2, 0;"		\
+			"2:	swi	%3, %2, 0;"		\
+			"	addik	%1, r0, 0;"		\
+			"3:"					\
+			"	.section .fixup, \"ax\";"	\
+			"4:	brid	3b;"			\
+			"	addik	%1, r0, 1;"		\
+			"	.previous;"			\
+			"	.section __ex_table,\"a\";"	\
+			"	.word	1b,4b;"			\
+			"	.word	2b,4b;"			\
+			"	.previous;"			\
 			: "=&r" (old), "=r" (faulted)
 			: "r" (parent), "r" (return_hooker)
 	);
+
+	flush_dcache_range((u32)parent, (u32)parent + 4);
+	flush_icache_range((u32)parent, (u32)parent + 4);
 
 	if (unlikely(faulted)) {
 		ftrace_graph_stop();
@@ -78,22 +81,25 @@ static int ftrace_modify_code(unsigned long addr, unsigned int value)
 {
 	int faulted = 0;
 
-	__asm__ __volatile__("	1:	swi	%2, %1, 0;		\
-					addik	%0, r0, 0;		\
-				2:					\
-					.section .fixup, \"ax\";	\
-				3:	brid	2b;			\
-					addik	%0, r0, 1;		\
-					.previous;			\
-					.section __ex_table,\"a\";	\
-					.word	1b,3b;			\
-					.previous;"			\
+	__asm__ __volatile__("	1:	swi	%2, %1, 0;"		\
+				"	addik	%0, r0, 0;"		\
+				"2:"					\
+				"	.section .fixup, \"ax\";"	\
+				"3:	brid	2b;"			\
+				"	addik	%0, r0, 1;"		\
+				"	.previous;"			\
+				"	.section __ex_table,\"a\";"	\
+				"	.word	1b,3b;"			\
+				"	.previous;"			\
 				: "=r" (faulted)
 				: "r" (addr), "r" (value)
 	);
 
 	if (unlikely(faulted))
 		return -EFAULT;
+
+	flush_dcache_range(addr, addr + 4);
+	flush_icache_range(addr, addr + 4);
 
 	return 0;
 }
@@ -195,8 +201,6 @@ int ftrace_update_ftrace_func(ftrace_func_t func)
 	ret += ftrace_modify_code((unsigned long)&ftrace_caller,
 				  MICROBLAZE_NOP);
 
-	/* All changes are done - lets do caches consistent */
-	flush_icache();
 	return ret;
 }
 
@@ -210,7 +214,6 @@ int ftrace_enable_ftrace_graph_caller(void)
 
 	old_jump = *(unsigned int *)ip; /* save jump over instruction */
 	ret = ftrace_modify_code(ip, MICROBLAZE_NOP);
-	flush_icache();
 
 	pr_debug("%s: Replace instruction: 0x%x\n", __func__, old_jump);
 	return ret;
@@ -222,7 +225,6 @@ int ftrace_disable_ftrace_graph_caller(void)
 	unsigned long ip = (unsigned long)(&ftrace_call_graph);
 
 	ret = ftrace_modify_code(ip, old_jump);
-	flush_icache();
 
 	pr_debug("%s\n", __func__);
 	return ret;

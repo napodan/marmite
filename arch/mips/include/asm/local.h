@@ -3,7 +3,7 @@
 
 #include <linux/percpu.h>
 #include <linux/bitops.h>
-#include <asm/atomic.h>
+#include <linux/atomic.h>
 #include <asm/cmpxchg.h>
 #include <asm/war.h>
 
@@ -15,10 +15,10 @@ typedef struct
 #define LOCAL_INIT(i)	{ ATOMIC_LONG_INIT(i) }
 
 #define local_read(l)	atomic_long_read(&(l)->a)
-#define local_set(l, i)	atomic_long_set(&(l)->a, (i))
+#define local_set(l, i) atomic_long_set(&(l)->a, (i))
 
-#define local_add(i, l)	atomic_long_add((i), (&(l)->a))
-#define local_sub(i, l)	atomic_long_sub((i), (&(l)->a))
+#define local_add(i, l) atomic_long_add((i), (&(l)->a))
+#define local_sub(i, l) atomic_long_sub((i), (&(l)->a))
 #define local_inc(l)	atomic_long_inc(&(l)->a)
 #define local_dec(l)	atomic_long_dec(&(l)->a)
 
@@ -117,7 +117,7 @@ static __inline__ long local_sub_return(long i, local_t * l)
 
 #define local_cmpxchg(l, o, n) \
 	((long)cmpxchg_local(&((l)->a.counter), (o), (n)))
-#define local_xchg(l, n) (xchg_local(&((l)->a.counter), (n)))
+#define local_xchg(l, n) (atomic_long_xchg((&(l)->a), (n)))
 
 /**
  * local_add_unless - add unless the number is a given value

@@ -22,7 +22,7 @@
  */
 #include <linux/sched.h>
 #include <linux/mm.h>
-#include <linux/module.h>
+#include <linux/export.h>
 
 #include <asm/spu.h>
 #include <asm/spu_csa.h>
@@ -75,7 +75,7 @@ int spu_handle_mm_fault(struct mm_struct *mm, unsigned long ea,
 		if (*flt & VM_FAULT_OOM) {
 			ret = -ENOMEM;
 			goto out_unlock;
-		} else if (*flt & VM_FAULT_SIGBUS) {
+		} else if (*flt & (VM_FAULT_SIGBUS | VM_FAULT_SIGSEGV)) {
 			ret = -EFAULT;
 			goto out_unlock;
 		}

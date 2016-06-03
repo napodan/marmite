@@ -1,7 +1,6 @@
 /*
  * MIPS floating point support
  * Copyright (C) 1994-2000 Algorithmics Ltd.
- * http://www.algor.co.uk
  *
  * ########################################################################
  *
@@ -26,7 +25,7 @@
  *  Added preprocessor hacks to map to Linux kernel diagnostics.
  *
  *  Kevin D. Kissell, kevink@mips.com and Carsten Langgaard, carstenl@mips.com
- *  Copyright (C) 2000 MIPS Technologies, Inc.  All rights reserved.
+ *  Copyright (C) 2000 MIPS Technologies, Inc.	All rights reserved.
  *************************************************************************/
 
 #include <linux/kernel.h>

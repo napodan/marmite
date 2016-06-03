@@ -21,6 +21,8 @@
 #include <linux/io.h>
 #include <linux/clocksource.h>
 #include <linux/clockchips.h>
+#include <linux/export.h>
+#include <linux/sched_clock.h>
 #include <mach/hardware.h>
 #include <asm/irq.h>
 #include <asm/uaccess.h>
@@ -29,9 +31,14 @@
 #include <mach/time.h>
 
 /*
+ * Minimum clocksource/clockevent timer range in seconds
+ */
+#define IOP_MIN_RANGE 4
+
+/*
  * IOP clocksource (free-running timer 1).
  */
-static cycle_t iop_clocksource_read(struct clocksource *unused)
+static cycle_t notrace iop_clocksource_read(struct clocksource *unused)
 {
 	return 0xffffffffu - read_tcr1();
 }
@@ -44,36 +51,12 @@ static struct clocksource iop_clocksource = {
 	.flags		= CLOCK_SOURCE_IS_CONTINUOUS,
 };
 
-static void __init iop_clocksource_set_hz(struct clocksource *cs, unsigned int hz)
-{
-	u64 temp;
-	u32 shift;
-
-	/* Find shift and mult values for hz. */
-	shift = 32;
-	do {
-		temp = (u64) NSEC_PER_SEC << shift;
-		do_div(temp, hz);
-		if ((temp >> 32) == 0)
-			break;
-	} while (--shift != 0);
-
-	cs->shift = shift;
-	cs->mult = (u32) temp;
-
-	printk(KERN_INFO "clocksource: %s uses shift %u mult %#x\n",
-	       cs->name, cs->shift, cs->mult);
-}
-
 /*
  * IOP sched_clock() implementation via its clocksource.
  */
-unsigned long long sched_clock(void)
+static u32 notrace iop_read_sched_clock(void)
 {
-	cycle_t cyc = iop_clocksource_read(NULL);
-	struct clocksource *cs = &iop_clocksource;
-
-	return clocksource_cyc2ns(cyc, cs->mult, cs->shift);
+	return 0xffffffffu - read_tcr1();
 }
 
 /*
@@ -103,6 +86,7 @@ static void iop_set_mode(enum clock_event_mode mode,
 	case CLOCK_EVT_MODE_PERIODIC:
 		write_tmr0(tmr & ~IOP_TMR_EN);
 		write_tcr0(ticks_per_jiffy - 1);
+		write_trr0(ticks_per_jiffy - 1);
 		tmr |= (IOP_TMR_RELOAD | IOP_TMR_EN);
 		break;
 	case CLOCK_EVT_MODE_ONESHOT:
@@ -129,27 +113,6 @@ static struct clock_event_device iop_clockevent = {
 	.set_next_event	= iop_set_next_event,
 	.set_mode	= iop_set_mode,
 };
-
-static void __init iop_clockevent_set_hz(struct clock_event_device *ce, unsigned int hz)
-{
-	u64 temp;
-	u32 shift;
-
-	/* Find shift and mult values for hz. */
-	shift = 32;
-	do {
-		temp = (u64) hz << shift;
-		do_div(temp, NSEC_PER_SEC);
-		if ((temp >> 32) == 0)
-			break;
-	} while (--shift != 0);
-
-	ce->shift = shift;
-	ce->mult = (u32) temp;
-
-	printk(KERN_INFO "clockevent: %s uses shift %u mult %#lx\n",
-	       ce->name, ce->shift, ce->mult);
-}
 
 static irqreturn_t
 iop_timer_interrupt(int irq, void *dev_id)
@@ -179,6 +142,8 @@ void __init iop_init_time(unsigned long tick_rate)
 {
 	u32 timer_ctl;
 
+	setup_sched_clock(iop_read_sched_clock, 32, tick_rate);
+
 	ticks_per_jiffy = DIV_ROUND_CLOSEST(tick_rate, HZ);
 	iop_tick_rate = tick_rate;
 
@@ -189,17 +154,11 @@ void __init iop_init_time(unsigned long tick_rate)
 	 * Set up interrupting clockevent timer 0.
 	 */
 	write_tmr0(timer_ctl & ~IOP_TMR_EN);
+	write_tisr(1);
 	setup_irq(IRQ_IOP_TIMER0, &iop_timer_irq);
-	iop_clockevent_set_hz(&iop_clockevent, tick_rate);
-	iop_clockevent.max_delta_ns =
-		clockevent_delta2ns(0xfffffffe, &iop_clockevent);
-	iop_clockevent.min_delta_ns =
-		clockevent_delta2ns(0xf, &iop_clockevent);
 	iop_clockevent.cpumask = cpumask_of(0);
-	clockevents_register_device(&iop_clockevent);
-	write_trr0(ticks_per_jiffy - 1);
-	write_tcr0(ticks_per_jiffy - 1);
-	write_tmr0(timer_ctl);
+	clockevents_config_and_register(&iop_clockevent, tick_rate,
+					0xf, 0xfffffffe);
 
 	/*
 	 * Set up free-running clocksource timer 1.
@@ -207,6 +166,5 @@ void __init iop_init_time(unsigned long tick_rate)
 	write_trr1(0xffffffff);
 	write_tcr1(0xffffffff);
 	write_tmr1(timer_ctl);
-	iop_clocksource_set_hz(&iop_clocksource, tick_rate);
-	clocksource_register(&iop_clocksource);
+	clocksource_register_hz(&iop_clocksource, tick_rate);
 }

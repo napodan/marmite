@@ -15,7 +15,6 @@
 
 #include <asm/openprom.h>
 #include <asm/oplib.h>
-#include <asm/system.h>
 #include <asm/ldc.h>
 
 static int prom_service_exists(const char *service_name)
@@ -169,7 +168,8 @@ unsigned char prom_get_idprom(char *idbuf, int num_bytes)
 
 int prom_get_mmu_ihandle(void)
 {
-	int node, ret;
+	phandle node;
+	int ret;
 
 	if (prom_mmu_ihandle_cache != 0)
 		return prom_mmu_ihandle_cache;
@@ -187,7 +187,8 @@ int prom_get_mmu_ihandle(void)
 static int prom_get_memory_ihandle(void)
 {
 	static int memory_ihandle_cache;
-	int node, ret;
+	phandle node;
+	int ret;
 
 	if (memory_ihandle_cache != 0)
 		return memory_ihandle_cache;

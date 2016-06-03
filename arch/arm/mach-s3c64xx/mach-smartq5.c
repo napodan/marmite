@@ -12,7 +12,6 @@
 #include <linux/fb.h>
 #include <linux/gpio.h>
 #include <linux/gpio_keys.h>
-#include <linux/i2c-gpio.h>
 #include <linux/init.h>
 #include <linux/input.h>
 #include <linux/leds.h>
@@ -21,44 +20,20 @@
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 
+#include <video/samsung_fimd.h>
 #include <mach/map.h>
-#include <mach/regs-fb.h>
 #include <mach/regs-gpio.h>
-#include <mach/s3c6410.h>
 
 #include <plat/cpu.h>
 #include <plat/devs.h>
 #include <plat/fb.h>
 #include <plat/gpio-cfg.h>
+#include <plat/samsung-time.h>
 
+#include "common.h"
 #include "mach-smartq.h"
 
-static void __init smartq5_lcd_setup_gpio(void)
-{
-	gpio_request(S3C64XX_GPM(0), "LCD SCEN pin");
-	gpio_request(S3C64XX_GPM(1), "LCD SCL pin");
-	gpio_request(S3C64XX_GPM(2), "LCD SDA pin");
-	gpio_request(S3C64XX_GPM(3), "LCD power");
-
-	/* turn power off */
-	gpio_direction_output(S3C64XX_GPM(0), 1);
-	gpio_direction_input(S3C64XX_GPM(1));
-	gpio_direction_input(S3C64XX_GPM(2));
-	gpio_direction_output(S3C64XX_GPM(3), 0);
-}
-
-static struct i2c_gpio_platform_data smartq5_lcd_control = {
-	.sda_pin		= S3C64XX_GPM(2),
-	.scl_pin		= S3C64XX_GPM(1),
-};
-
-static struct platform_device smartq5_lcd_control_device = {
-	.name			= "i2c-gpio",
-	.id			= 1,
-	.dev.platform_data	= &smartq5_lcd_control,
-};
-
-static struct gpio_led smartq5_leds[] __initdata = {
+static struct gpio_led smartq5_leds[] = {
 	{
 		.name			= "smartq5:green",
 		.active_low		= 1,
@@ -133,24 +108,27 @@ static struct platform_device smartq5_buttons_device  = {
 };
 
 static struct s3c_fb_pd_win smartq5_fb_win0 = {
-	.win_mode	= {
-		.pixclock	= 1000000000000ULL /
-				((40+1+216+800)*(10+1+35+480)*80),
-		.left_margin	= 40,
-		.right_margin	= 216,
-		.upper_margin	= 10,
-		.lower_margin	= 35,
-		.hsync_len	= 1,
-		.vsync_len	= 1,
-		.xres		= 800,
-		.yres		= 480,
-	},
 	.max_bpp	= 32,
 	.default_bpp	= 16,
+	.xres		= 800,
+	.yres		= 480,
+};
+
+static struct fb_videomode smartq5_lcd_timing = {
+	.left_margin	= 216,
+	.right_margin	= 40,
+	.upper_margin	= 35,
+	.lower_margin	= 10,
+	.hsync_len	= 1,
+	.vsync_len	= 1,
+	.xres		= 800,
+	.yres		= 480,
+	.refresh	= 80,
 };
 
 static struct s3c_fb_platdata smartq5_lcd_pdata __initdata = {
 	.setup_gpio	= s3c64xx_fb_gpio_setup_24bpp,
+	.vtiming	= &smartq5_lcd_timing,
 	.win[0]		= &smartq5_fb_win0,
 	.vidcon0	= VIDCON0_VIDOUT_RGB | VIDCON0_PNRMODE_RGB,
 	.vidcon1	= VIDCON1_INV_HSYNC | VIDCON1_INV_VSYNC |
@@ -160,7 +138,6 @@ static struct s3c_fb_platdata smartq5_lcd_pdata __initdata = {
 static struct platform_device *smartq5_devices[] __initdata = {
 	&smartq5_leds_device,
 	&smartq5_buttons_device,
-	&smartq5_lcd_control_device,
 };
 
 static void __init smartq5_machine_init(void)
@@ -168,18 +145,17 @@ static void __init smartq5_machine_init(void)
 	s3c_fb_set_platdata(&smartq5_lcd_pdata);
 
 	smartq_machine_init();
-	smartq5_lcd_setup_gpio();
 
 	platform_add_devices(smartq5_devices, ARRAY_SIZE(smartq5_devices));
 }
 
 MACHINE_START(SMARTQ5, "SmartQ 5")
 	/* Maintainer: Maurus Cuelenaere <mcuelenaere AT gmail DOT com> */
-	.phys_io	= S3C_PA_UART & 0xfff00000,
-	.io_pg_offst	= (((u32)S3C_VA_UART) >> 18) & 0xfffc,
-	.boot_params	= S3C64XX_PA_SDRAM + 0x100,
+	.atag_offset	= 0x100,
 	.init_irq	= s3c6410_init_irq,
 	.map_io		= smartq_map_io,
 	.init_machine	= smartq5_machine_init,
-	.timer		= &s3c24xx_timer,
+	.init_late	= s3c64xx_init_late,
+	.init_time	= samsung_timer_init,
+	.restart	= s3c64xx_restart,
 MACHINE_END

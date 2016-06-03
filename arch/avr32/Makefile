@@ -11,9 +11,9 @@ all: uImage vmlinux.elf
 
 KBUILD_DEFCONFIG	:= atstk1002_defconfig
 
-KBUILD_CFLAGS	+= -pipe -fno-builtin -mno-pic
+KBUILD_CFLAGS	+= -pipe -fno-builtin -mno-pic -D__linux__
 KBUILD_AFLAGS	+= -mrelax -mno-pic
-CFLAGS_MODULE	+= -mno-relax
+KBUILD_CFLAGS_MODULE += -mno-relax
 LDFLAGS_vmlinux	+= --relax
 
 cpuflags-$(CONFIG_PLATFORM_AT32AP)	+= -march=ap

@@ -23,9 +23,10 @@
 #include <asm/thread_info.h>
 #include <asm/ppc_asm.h>
 #include <asm/asm-offsets.h>
+#include <asm/ptrace.h>
 
 #ifdef CONFIG_VSX
-#define REST_32FPVSRS(n,c,base)						\
+#define __REST_32FPVSRS(n,c,base)					\
 BEGIN_FTR_SECTION							\
 	b	2f;							\
 END_FTR_SECTION_IFSET(CPU_FTR_VSX);					\
@@ -34,7 +35,16 @@ END_FTR_SECTION_IFSET(CPU_FTR_VSX);					\
 2:	REST_32VSRS(n,c,base);						\
 3:
 
-#define SAVE_32FPVSRS(n,c,base)						\
+#define __REST_32FPVSRS_TRANSACT(n,c,base)				\
+BEGIN_FTR_SECTION							\
+	b	2f;							\
+END_FTR_SECTION_IFSET(CPU_FTR_VSX);					\
+	REST_32FPRS_TRANSACT(n,base);					\
+	b	3f;							\
+2:	REST_32VSRS_TRANSACT(n,c,base);					\
+3:
+
+#define __SAVE_32FPVSRS(n,c,base)					\
 BEGIN_FTR_SECTION							\
 	b	2f;							\
 END_FTR_SECTION_IFSET(CPU_FTR_VSX);					\
@@ -43,9 +53,68 @@ END_FTR_SECTION_IFSET(CPU_FTR_VSX);					\
 2:	SAVE_32VSRS(n,c,base);						\
 3:
 #else
-#define REST_32FPVSRS(n,b,base)	REST_32FPRS(n, base)
-#define SAVE_32FPVSRS(n,b,base)	SAVE_32FPRS(n, base)
+#define __REST_32FPVSRS(n,b,base)	REST_32FPRS(n, base)
+#define __REST_32FPVSRS_TRANSACT(n,b,base)	REST_32FPRS(n, base)
+#define __SAVE_32FPVSRS(n,b,base)	SAVE_32FPRS(n, base)
 #endif
+#define REST_32FPVSRS(n,c,base) __REST_32FPVSRS(n,__REG_##c,__REG_##base)
+#define REST_32FPVSRS_TRANSACT(n,c,base) \
+	__REST_32FPVSRS_TRANSACT(n,__REG_##c,__REG_##base)
+#define SAVE_32FPVSRS(n,c,base) __SAVE_32FPVSRS(n,__REG_##c,__REG_##base)
+
+#ifdef CONFIG_PPC_TRANSACTIONAL_MEM
+/*
+ * Wrapper to call load_up_fpu from C.
+ * void do_load_up_fpu(struct pt_regs *regs);
+ */
+_GLOBAL(do_load_up_fpu)
+	mflr	r0
+	std	r0, 16(r1)
+	stdu	r1, -112(r1)
+
+	subi	r6, r3, STACK_FRAME_OVERHEAD
+	/* load_up_fpu expects r12=MSR, r13=PACA, and returns
+	 * with r12 = new MSR.
+	 */
+	ld	r12,_MSR(r6)
+	GET_PACA(r13)
+
+	bl	load_up_fpu
+	std	r12,_MSR(r6)
+
+	ld	r0, 112+16(r1)
+	addi	r1, r1, 112
+	mtlr	r0
+	blr
+
+
+/* void do_load_up_transact_fpu(struct thread_struct *thread)
+ *
+ * This is similar to load_up_fpu but for the transactional version of the FP
+ * register set.  It doesn't mess with the task MSR or valid flags.
+ * Furthermore, we don't do lazy FP with TM currently.
+ */
+_GLOBAL(do_load_up_transact_fpu)
+	mfmsr	r6
+	ori	r5,r6,MSR_FP
+#ifdef CONFIG_VSX
+BEGIN_FTR_SECTION
+	oris	r5,r5,MSR_VSX@h
+END_FTR_SECTION_IFSET(CPU_FTR_VSX)
+#endif
+	SYNC
+	MTMSRD(r5)
+
+	lfd	fr0,THREAD_TRANSACT_FPSCR(r3)
+	MTFSF_L(fr0)
+	REST_32FPVSRS_TRANSACT(0, R4, R3)
+
+	/* FP/VSX off again */
+	MTMSRD(r6)
+	SYNC
+
+	blr
+#endif /* CONFIG_PPC_TRANSACTIONAL_MEM */
 
 /*
  * This task wants to use the FPU now.
@@ -78,7 +147,7 @@ END_FTR_SECTION_IFSET(CPU_FTR_VSX)
 	beq	1f
 	toreal(r4)
 	addi	r4,r4,THREAD		/* want last_task_used_math->thread */
-	SAVE_32FPVSRS(0, r5, r4)
+	SAVE_32FPVSRS(0, R5, R4)
 	mffs	fr0
 	stfd	fr0,THREAD_FPSCR(r4)
 	PPC_LL	r5,PT_REGS(r4)
@@ -105,7 +174,7 @@ END_FTR_SECTION_IFSET(CPU_FTR_VSX)
 #endif
 	lfd	fr0,THREAD_FPSCR(r5)
 	MTFSF_L(fr0)
-	REST_32FPVSRS(0, r4, r5)
+	REST_32FPVSRS(0, R4, R5)
 #ifndef CONFIG_SMP
 	subi	r4,r5,THREAD
 	fromreal(r4)
@@ -139,7 +208,7 @@ END_FTR_SECTION_IFSET(CPU_FTR_VSX)
 	addi	r3,r3,THREAD	        /* want THREAD of task */
 	PPC_LL	r5,PT_REGS(r3)
 	PPC_LCMPI	0,r5,0
-	SAVE_32FPVSRS(0, r4 ,r3)
+	SAVE_32FPVSRS(0, R4 ,R3)
 	mffs	fr0
 	stfd	fr0,THREAD_FPSCR(r3)
 	beq	1f
@@ -163,24 +232,14 @@ END_FTR_SECTION_IFSET(CPU_FTR_VSX)
 /*
  * These are used in the alignment trap handler when emulating
  * single-precision loads and stores.
- * We restore and save the fpscr so the task gets the same result
- * and exceptions as if the cpu had performed the load or store.
  */
 
 _GLOBAL(cvt_fd)
-	lfd	0,THREAD_FPSCR(r5)	/* load up fpscr value */
-	MTFSF_L(0)
 	lfs	0,0(r3)
 	stfd	0,0(r4)
-	mffs	0
-	stfd	0,THREAD_FPSCR(r5)	/* save new fpscr value */
 	blr
 
 _GLOBAL(cvt_df)
-	lfd	0,THREAD_FPSCR(r5)	/* load up fpscr value */
-	MTFSF_L(0)
 	lfd	0,0(r3)
 	stfs	0,0(r4)
-	mffs	0
-	stfd	0,THREAD_FPSCR(r5)	/* save new fpscr value */
 	blr

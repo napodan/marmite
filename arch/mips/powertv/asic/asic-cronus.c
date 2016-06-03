@@ -17,10 +17,10 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
  *
- * Author:       Ken Eppinett
- *               David Schleef <ds@schleef.org>
+ * Author:	 Ken Eppinett
+ *		 David Schleef <ds@schleef.org>
  *
- * Description:  Defines the platform resources for the SA settop.
+ * Description:	 Defines the platform resources for the SA settop.
  */
 
 #include <linux/init.h>
@@ -28,7 +28,7 @@
 
 #define CRONUS_ADDR(x)	(CRONUS_IO_BASE + (x))
 
-const struct register_map cronus_register_map __initdata = {
+const struct register_map cronus_register_map __initconst = {
 	.eic_slow0_strt_add = {.phys = CRONUS_ADDR(0x000000)},
 	.eic_cfg_bits = {.phys = CRONUS_ADDR(0x000038)},
 	.eic_ready_status = {.phys = CRONUS_ADDR(0x00004C)},
@@ -77,13 +77,13 @@ const struct register_map cronus_register_map __initdata = {
 	.int_docsis_en = {.phys = CRONUS_ADDR(0x2A28F4)},
 
 	.mips_pll_setup = {.phys = CRONUS_ADDR(0x1C0000)},
-	.usb_fs = {.phys = CRONUS_ADDR(0x1C0018)},
+	.fs432x4b4_usb_ctl = {.phys = CRONUS_ADDR(0x1C0028)},
 	.test_bus = {.phys = CRONUS_ADDR(0x1C00CC)},
 	.crt_spare = {.phys = CRONUS_ADDR(0x1c00d4)},
 	.usb2_ohci_int_mask = {.phys = CRONUS_ADDR(0x20000C)},
 	.usb2_strap = {.phys = CRONUS_ADDR(0x200014)},
 	.ehci_hcapbase = {.phys = CRONUS_ADDR(0x21FE00)},
-	.ohci_hc_revision = {.phys = CRONUS_ADDR(0x1E0000)},
+	.ohci_hc_revision = {.phys = CRONUS_ADDR(0x21fc00)},
 	.bcm1_bs_lmi_steer = {.phys = CRONUS_ADDR(0x2E0008)},
 	.usb2_control = {.phys = CRONUS_ADDR(0x2E004C)},
 	.usb2_stbus_obc = {.phys = CRONUS_ADDR(0x21FF00)},

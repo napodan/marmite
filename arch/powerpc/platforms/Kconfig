@@ -1,12 +1,11 @@
 menu "Platform support"
 
+source "arch/powerpc/platforms/powernv/Kconfig"
 source "arch/powerpc/platforms/pseries/Kconfig"
-source "arch/powerpc/platforms/iseries/Kconfig"
 source "arch/powerpc/platforms/chrp/Kconfig"
 source "arch/powerpc/platforms/512x/Kconfig"
 source "arch/powerpc/platforms/52xx/Kconfig"
 source "arch/powerpc/platforms/powermac/Kconfig"
-source "arch/powerpc/platforms/prep/Kconfig"
 source "arch/powerpc/platforms/maple/Kconfig"
 source "arch/powerpc/platforms/pasemi/Kconfig"
 source "arch/powerpc/platforms/ps3/Kconfig"
@@ -20,6 +19,26 @@ source "arch/powerpc/platforms/embedded6xx/Kconfig"
 source "arch/powerpc/platforms/44x/Kconfig"
 source "arch/powerpc/platforms/40x/Kconfig"
 source "arch/powerpc/platforms/amigaone/Kconfig"
+source "arch/powerpc/platforms/wsp/Kconfig"
+
+config KVM_GUEST
+	bool "KVM Guest support"
+	default n
+	select EPAPR_PARAVIRT
+	---help---
+	  This option enables various optimizations for running under the KVM
+	  hypervisor. Overhead for the kernel when not running inside KVM should
+	  be minimal.
+
+	  In case of doubt, say Y
+
+config EPAPR_PARAVIRT
+	bool "ePAPR para-virtualization support"
+	default n
+	help
+	  Enables ePAPR para-virtualization support for guests.
+
+	  In case of doubt, say Y
 
 config PPC_NATIVE
 	bool
@@ -36,7 +55,7 @@ config PPC_OF_BOOT_TRAMPOLINE
 	help
 	  Support from booting from Open Firmware or yaboot using an
 	  Open Firmware client interface. This enables the kernel to
-	  communicate with open firmware to retrieve system informations
+	  communicate with open firmware to retrieve system information
 	  such as the device tree.
 
 	  In case of doubt, say Y
@@ -46,15 +65,18 @@ config UDBG_RTAS_CONSOLE
 	depends on PPC_RTAS
 	default n
 
+config PPC_SMP_MUXED_IPI
+	bool
+	help
+	  Select this opton if your platform supports SMP and your
+	  interrupt controller provides less than 4 interrupts to each
+	  cpu.	This will enable the generic code to multiplex the 4
+	  messages on to one ipi.
+
 config PPC_UDBG_BEAT
 	bool "BEAT based debug console"
 	depends on PPC_CELLEB
 	default n
-
-config XICS
-	depends on PPC_PSERIES
-	bool
-	default y
 
 config IPIC
 	bool
@@ -64,9 +86,22 @@ config MPIC
 	bool
 	default n
 
+config PPC_EPAPR_HV_PIC
+	bool
+	default n
+	select EPAPR_PARAVIRT
+
 config MPIC_WEIRD
 	bool
 	default n
+
+config MPIC_MSGR
+	bool "MPIC message register support"
+	depends on MPIC
+	default n
+	help
+	  Enables support for the MPIC message registers.  These
+	  registers are used for inter-processor communication.
 
 config PPC_I8259
 	bool
@@ -93,7 +128,7 @@ config PPC_RTAS_DAEMON
 
 config RTAS_PROC
 	bool "Proc interface to RTAS"
-	depends on PPC_RTAS
+	depends on PPC_RTAS && PROC_FS
 	default y
 
 config RTAS_FLASH
@@ -106,8 +141,7 @@ config MMIO_NVRAM
 
 config MPIC_U3_HT_IRQS
 	bool
-	depends on PPC_MAPLE
-	default y
+	default n
 
 config MPIC_BROKEN_REGREAD
 	bool
@@ -120,7 +154,7 @@ config MPIC_BROKEN_REGREAD
 	  of the register contents in software.
 
 config IBMVIO
-	depends on PPC_PSERIES || PPC_ISERIES
+	depends on PPC_PSERIES
 	bool
 	default y
 
@@ -138,14 +172,24 @@ config PPC_970_NAP
 	bool
 	default n
 
+config PPC_P7_NAP
+	bool
+	default n
+
 config PPC_INDIRECT_IO
 	bool
 	select GENERIC_IOMAP
-	default n
 
-config GENERIC_IOMAP
+config PPC_INDIRECT_PIO
 	bool
-	default n
+	select PPC_INDIRECT_IO
+
+config PPC_INDIRECT_MMIO
+	bool
+	select PPC_INDIRECT_IO
+
+config PPC_IO_WORKAROUNDS
+	bool
 
 source "drivers/cpufreq/Kconfig"
 
@@ -155,7 +199,6 @@ menu "CPU Frequency drivers"
 config CPU_FREQ_PMAC
 	bool "Support for Apple PowerBooks"
 	depends on ADB_PMU && PPC32
-	select CPU_FREQ_TABLE
 	help
 	  This adds support for frequency switching on Apple PowerBooks,
 	  this currently includes some models of iBook & Titanium
@@ -164,7 +207,6 @@ config CPU_FREQ_PMAC
 config CPU_FREQ_PMAC64
 	bool "Support for some Apple G5s"
 	depends on PPC_PMAC && PPC64
-	select CPU_FREQ_TABLE
 	help
 	  This adds support for frequency switching on Apple iMac G5,
 	  and some of the more recent desktop G5 machines as well.
@@ -173,16 +215,21 @@ config PPC_PASEMI_CPUFREQ
 	bool "Support for PA Semi PWRficient"
 	depends on PPC_PASEMI
 	default y
-	select CPU_FREQ_TABLE
 	help
 	  This adds the support for frequency switching on PA Semi
 	  PWRficient processors.
 
 endmenu
 
+menu "CPUIdle driver"
+
+source "drivers/cpuidle/Kconfig"
+
+endmenu
+
 config PPC601_SYNC_FIX
 	bool "Workarounds for PPC601 bugs"
-	depends on 6xx && (PPC_PREP || PPC_PMAC)
+	depends on 6xx && PPC_PMAC
 	help
 	  Some versions of the PPC601 (the first PowerPC chip) have bugs which
 	  mean that extra synchronization instructions are required near
@@ -240,7 +287,7 @@ config TAU_AVERAGE
 
 config QUICC_ENGINE
 	bool "Freescale QUICC Engine (QE) Support"
-	depends on FSL_SOC
+	depends on FSL_SOC && PPC32
 	select PPC_LIB_RHEAP
 	select CRC32
 	help
@@ -252,7 +299,6 @@ config QUICC_ENGINE
 config QE_GPIO
 	bool "QE GPIO support"
 	depends on QUICC_ENGINE
-	select GENERIC_GPIO
 	select ARCH_REQUIRE_GPIOLIB
 	help
 	  Say Y here if you're going to use hardware that connects to the
@@ -265,7 +311,6 @@ config CPM2
 	select PPC_LIB_RHEAP
 	select PPC_PCI_CHOICE
 	select ARCH_REQUIRE_GPIOLIB
-	select GENERIC_GPIO
 	help
 	  The CPM2 (Communications Processor Module) is a coprocessor on
 	  embedded CPUs made by Freescale.  Selecting this option means that
@@ -293,7 +338,6 @@ config FSL_ULI1575
 
 config CPM
 	bool
-	select PPC_CLOCK
 
 config OF_RTC
 	bool
@@ -301,21 +345,9 @@ config OF_RTC
 	  Uses information from the OF or flattened device tree to instantiate
 	  platform devices for direct mapped RTC chips like the DS1742 or DS1743.
 
-source "arch/powerpc/sysdev/bestcomm/Kconfig"
-
-config MPC8xxx_GPIO
-	bool "MPC8xxx GPIO support"
-	depends on PPC_MPC831x || PPC_MPC834x || PPC_MPC837x || FSL_SOC_BOOKE || PPC_86xx
-	select GENERIC_GPIO
-	select ARCH_REQUIRE_GPIOLIB
-	help
-	  Say Y here if you're going to use hardware that connects to the
-	  MPC831x/834x/837x/8572/8610 GPIOs.
-
 config SIMPLE_GPIO
 	bool "Support for simple, memory-mapped GPIO controllers"
 	depends on PPC
-	select GENERIC_GPIO
 	select ARCH_REQUIRE_GPIOLIB
 	help
 	  Say Y here to support simple, memory-mapped GPIO controllers.
@@ -324,9 +356,8 @@ config SIMPLE_GPIO
 	  on-board peripherals.
 
 config MCU_MPC8349EMITX
-	tristate "MPC8349E-mITX MCU driver"
-	depends on I2C && PPC_83xx
-	select GENERIC_GPIO
+	bool "MPC8349E-mITX MCU driver"
+	depends on I2C=y && PPC_83xx
 	select ARCH_REQUIRE_GPIOLIB
 	help
 	  Say Y here to enable soft power-off functionality on the Freescale

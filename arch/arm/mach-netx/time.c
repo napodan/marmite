@@ -76,7 +76,6 @@ static int netx_set_next_event(unsigned long evt,
 
 static struct clock_event_device netx_clockevent = {
 	.name = "netx-timer" __stringify(TIMER_CLOCKEVENT),
-	.shift = 32,
 	.features = CLOCK_EVT_FEAT_PERIODIC | CLOCK_EVT_FEAT_ONESHOT,
 	.set_next_event = netx_set_next_event,
 	.set_mode = netx_set_mode,
@@ -104,24 +103,10 @@ static struct irqaction netx_timer_irq = {
 	.handler	= netx_timer_interrupt,
 };
 
-cycle_t netx_get_cycles(struct clocksource *cs)
-{
-	return readl(NETX_GPIO_COUNTER_CURRENT(TIMER_CLOCKSOURCE));
-}
-
-static struct clocksource clocksource_netx = {
-	.name		= "netx_timer",
-	.rating		= 200,
-	.read		= netx_get_cycles,
-	.mask		= CLOCKSOURCE_MASK(32),
-	.shift		= 20,
-	.flags		= CLOCK_SOURCE_IS_CONTINUOUS,
-};
-
 /*
  * Set up timer interrupt
  */
-static void __init netx_timer_init(void)
+void __init netx_timer_init(void)
 {
 	/* disable timer initially */
 	writel(0, NETX_GPIO_COUNTER_CTRL(0));
@@ -151,22 +136,12 @@ static void __init netx_timer_init(void)
 	writel(NETX_GPIO_COUNTER_CTRL_RUN,
 			NETX_GPIO_COUNTER_CTRL(TIMER_CLOCKSOURCE));
 
-	clocksource_netx.mult =
-		clocksource_hz2mult(CLOCK_TICK_RATE, clocksource_netx.shift);
-	clocksource_register(&clocksource_netx);
+	clocksource_mmio_init(NETX_GPIO_COUNTER_CURRENT(TIMER_CLOCKSOURCE),
+		"netx_timer", CLOCK_TICK_RATE, 200, 32, clocksource_mmio_readl_up);
 
-	netx_clockevent.mult = div_sc(CLOCK_TICK_RATE, NSEC_PER_SEC,
-			netx_clockevent.shift);
-	netx_clockevent.max_delta_ns =
-		clockevent_delta2ns(0xfffffffe, &netx_clockevent);
 	/* with max_delta_ns >= delta2ns(0x800) the system currently runs fine.
 	 * Adding some safety ... */
-	netx_clockevent.min_delta_ns =
-		clockevent_delta2ns(0xa00, &netx_clockevent);
 	netx_clockevent.cpumask = cpumask_of(0);
-	clockevents_register_device(&netx_clockevent);
+	clockevents_config_and_register(&netx_clockevent, CLOCK_TICK_RATE,
+					0xa00, 0xfffffffe);
 }
-
-struct sys_timer netx_timer = {
-	.init		= netx_timer_init,
-};

@@ -1,4 +1,4 @@
-# arch/arm/plat-s3c64xx/Makefile
+# arch/arm/plat-samsung/Makefile
 #
 # Copyright 2009 Simtec Electronics
 #
@@ -11,18 +11,19 @@ obj-				:=
 
 # Objects we always build independent of SoC choice
 
-obj-y				+= init.o
-obj-y				+= time.o
-obj-y				+= clock.o
-obj-y				+= pwm-clock.o
-obj-y				+= gpio.o
-obj-y				+= gpio-config.o
+obj-y				+= init.o cpu.o
+obj-$(CONFIG_SAMSUNG_HRT) 	+= samsung-time.o
 
-obj-$(CONFIG_SAMSUNG_GPIOLIB_4BIT)	+= gpiolib.o
+obj-$(CONFIG_SAMSUNG_CLOCK)	+= clock.o
+obj-$(CONFIG_SAMSUNG_CLOCK)	+= pwm-clock.o
+
 obj-$(CONFIG_SAMSUNG_CLKSRC)	+= clock-clksrc.o
+obj-$(CONFIG_S5P_CLOCK)		+= s5p-clock.o
 
-obj-$(CONFIG_SAMSUNG_IRQ_UART)	+= irq-uart.o
 obj-$(CONFIG_SAMSUNG_IRQ_VIC_TIMER) += irq-vic-timer.o
+obj-$(CONFIG_S5P_IRQ)		+= s5p-irq.o
+obj-$(CONFIG_S5P_EXT_INT)	+= s5p-irq-eint.o
+obj-$(CONFIG_S5P_GPIO_INT)	+= s5p-irq-gpioint.o
 
 # ADC
 
@@ -30,30 +31,23 @@ obj-$(CONFIG_S3C_ADC)	+= adc.o
 
 # devices
 
-obj-$(CONFIG_S3C_DEV_HSMMC)	+= dev-hsmmc.o
-obj-$(CONFIG_S3C_DEV_HSMMC1)	+= dev-hsmmc1.o
-obj-$(CONFIG_S3C_DEV_HSMMC2)	+= dev-hsmmc2.o
-obj-$(CONFIG_S3C_DEV_HWMON)	+= dev-hwmon.o
-obj-y				+= dev-i2c0.o
-obj-$(CONFIG_S3C_DEV_I2C1)	+= dev-i2c1.o
-obj-$(CONFIG_S3C_DEV_I2C2)	+= dev-i2c2.o
-obj-$(CONFIG_S3C_DEV_FB)	+= dev-fb.o
-obj-y				+= dev-uart.o
-obj-$(CONFIG_S3C_DEV_USB_HOST)	+= dev-usb.o
-obj-$(CONFIG_S3C_DEV_USB_HSOTG)	+= dev-usb-hsotg.o
-obj-$(CONFIG_S3C_DEV_WDT)	+= dev-wdt.o
-obj-$(CONFIG_S3C_DEV_NAND)	+= dev-nand.o
-obj-$(CONFIG_S3C_DEV_ONENAND)	+= dev-onenand.o
-obj-$(CONFIG_S3C_DEV_RTC)	+= dev-rtc.o
+obj-y				+= platformdata.o
 
-obj-$(CONFIG_SAMSUNG_DEV_ADC)	+= dev-adc.o
-obj-$(CONFIG_SAMSUNG_DEV_TS)	+= dev-ts.o
+obj-y				+= devs.o
+obj-y				+= dev-uart.o
+obj-$(CONFIG_S5P_DEV_MFC)	+= s5p-dev-mfc.o
+obj-$(CONFIG_S5P_DEV_UART)	+= s5p-dev-uart.o
+
+obj-$(CONFIG_SAMSUNG_DEV_BACKLIGHT)	+= dev-backlight.o
+
+obj-$(CONFIG_S3C_SETUP_CAMIF)	+= setup-camif.o
+obj-$(CONFIG_S5P_SETUP_MIPIPHY)	+= setup-mipiphy.o
 
 # DMA support
 
-obj-$(CONFIG_S3C_DMA)		+= dma.o
+obj-$(CONFIG_S3C_DMA)		+= dma.o s3c-dma-ops.o
 
-obj-$(CONFIG_S3C_PL330_DMA)	+= s3c-pl330.o
+obj-$(CONFIG_SAMSUNG_DMADEV)	+= dma-ops.o
 
 # PM support
 
@@ -63,6 +57,5 @@ obj-$(CONFIG_SAMSUNG_PM_CHECK)	+= pm-check.o
 
 obj-$(CONFIG_SAMSUNG_WAKEMASK)	+= wakeup-mask.o
 
-# PWM support
-
-obj-$(CONFIG_HAVE_PWM)		+= pwm.o
+obj-$(CONFIG_S5P_PM)		+= s5p-pm.o s5p-irq-pm.o
+obj-$(CONFIG_S5P_SLEEP)		+= s5p-sleep.o

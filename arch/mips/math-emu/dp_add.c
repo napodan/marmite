@@ -4,7 +4,6 @@
 /*
  * MIPS floating point support
  * Copyright (C) 1994-2000 Algorithmics Ltd.
- * http://www.algor.co.uk
  *
  * ########################################################################
  *
@@ -154,7 +153,7 @@ ieee754dp ieee754dp_add(ieee754dp x, ieee754dp y)
 		xe = xe;
 		xs = xs;
 
-		if (xm >> (DP_MBITS + 1 + 3)) {	/* carry out */
+		if (xm >> (DP_MBITS + 1 + 3)) { /* carry out */
 			xm = XDPSRS1(xm);
 			xe++;
 		}

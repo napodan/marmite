@@ -174,10 +174,10 @@
 #include <asm/ptrace.h>
 
 #include <asm/irq.h>
-#include <arch/hwregs/reg_map.h>
-#include <arch/hwregs/reg_rdwr.h>
-#include <arch/hwregs/intr_vect_defs.h>
-#include <arch/hwregs/ser_defs.h>
+#include <hwregs/reg_map.h>
+#include <hwregs/reg_rdwr.h>
+#include <hwregs/intr_vect_defs.h>
+#include <hwregs/ser_defs.h>
 
 /* From entry.S. */
 extern void gdb_handle_exception(void);
@@ -381,22 +381,8 @@ static int read_register(char regno, unsigned int *valptr);
 /* Serial port, reads one character. ETRAX 100 specific. from debugport.c */
 int getDebugChar(void);
 
-#ifdef CONFIG_ETRAX_VCS_SIM
-int getDebugChar(void)
-{
-  return socketread();
-}
-#endif
-
 /* Serial port, writes one character. ETRAX 100 specific. from debugport.c */
 void putDebugChar(int val);
-
-#ifdef CONFIG_ETRAX_VCS_SIM
-void putDebugChar(int val)
-{
-  socketwrite((char *)&val, 1);
-}
-#endif
 
 /* Returns the integer equivalent of a hexadecimal character. */
 static int hex(char ch);
@@ -677,7 +663,7 @@ mem2hex(char *buf, unsigned char *mem, int count)
                 /* Valid mem address. */
 		for (i = 0; i < count; i++) {
 			ch = *mem++;
-			buf = pack_hex_byte(buf, ch);
+			buf = hex_byte_pack(buf, ch);
 		}
         }
         /* Terminate properly. */
@@ -695,7 +681,7 @@ mem2hex_nbo(char *buf, unsigned char *mem, int count)
 	mem += count - 1;
 	for (i = 0; i < count; i++) {
 		ch = *mem--;
-		buf = pack_hex_byte(buf, ch);
+		buf = hex_byte_pack(buf, ch);
         }
 
         /* Terminate properly. */
@@ -880,7 +866,7 @@ stub_is_stopped(int sigval)
 	/* Send trap type (converted to signal) */
 
 	*ptr++ = 'T';
-	ptr = pack_hex_byte(ptr, sigval);
+	ptr = hex_byte_pack(ptr, sigval);
 
 	if (((reg.exs & 0xff00) >> 8) == 0xc) {
 
@@ -925,7 +911,7 @@ stub_is_stopped(int sigval)
 
 					if (reg.eda >= bp_d_regs[bp * 2] &&
 					    reg.eda <= bp_d_regs[bp * 2 + 1]) {
-						/* EDA withing range for this BP; it must be the one
+						/* EDA within range for this BP; it must be the one
 						   we're looking for. */
 						stopped_data_address = reg.eda;
 						break;
@@ -988,26 +974,26 @@ stub_is_stopped(int sigval)
 	}
 	/* Only send PC, frame and stack pointer. */
 	read_register(PC, &reg_cont);
-	ptr = pack_hex_byte(PC);
+	ptr = hex_byte_pack(ptr, PC);
 	*ptr++ = ':';
 	ptr = mem2hex(ptr, (unsigned char *)&reg_cont, register_size[PC]);
 	*ptr++ = ';';
 
 	read_register(R8, &reg_cont);
-	ptr = pack_hex_byte(R8);
+	ptr = hex_byte_pack(ptr, R8);
 	*ptr++ = ':';
 	ptr = mem2hex(ptr, (unsigned char *)&reg_cont, register_size[R8]);
 	*ptr++ = ';';
 
 	read_register(SP, &reg_cont);
-	ptr = pack_hex_byte(SP);
+	ptr = hex_byte_pack(ptr, SP);
 	*ptr++ = ':';
 	ptr = mem2hex(ptr, (unsigned char *)&reg_cont, register_size[SP]);
 	*ptr++ = ';';
 
 	/* Send ERP as well; this will save us an entire register fetch in some cases. */
         read_register(ERP, &reg_cont);
-	ptr = pack_hex_byte(ERP);
+	ptr = hex_byte_pack(ptr, ERP);
         *ptr++ = ':';
         ptr = mem2hex(ptr, (unsigned char *)&reg_cont, register_size[ERP]);
         *ptr++ = ';';

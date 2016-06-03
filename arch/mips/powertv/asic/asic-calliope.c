@@ -17,10 +17,10 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
  *
- * Author:       Ken Eppinett
- *               David Schleef <ds@schleef.org>
+ * Author:	 Ken Eppinett
+ *		 David Schleef <ds@schleef.org>
  *
- * Description:  Defines the platform resources for the SA settop.
+ * Description:	 Defines the platform resources for the SA settop.
  */
 
 #include <linux/init.h>
@@ -28,7 +28,7 @@
 
 #define CALLIOPE_ADDR(x)	(CALLIOPE_IO_BASE + (x))
 
-const struct register_map calliope_register_map __initdata = {
+const struct register_map calliope_register_map __initconst = {
 	.eic_slow0_strt_add = {.phys = CALLIOPE_ADDR(0x800000)},
 	.eic_cfg_bits = {.phys = CALLIOPE_ADDR(0x800038)},
 	.eic_ready_status = {.phys = CALLIOPE_ADDR(0x80004c)},
@@ -77,7 +77,7 @@ const struct register_map calliope_register_map __initdata = {
 	.int_docsis_en = {.phys = CALLIOPE_ADDR(0xA028F4)},
 
 	.mips_pll_setup = {.phys = CALLIOPE_ADDR(0x980000)},
-	.usb_fs = {.phys = CALLIOPE_ADDR(0x980030)},
+	.fs432x4b4_usb_ctl = {.phys = CALLIOPE_ADDR(0x980030)},
 	.test_bus = {.phys = CALLIOPE_ADDR(0x9800CC)},
 	.crt_spare = {.phys = CALLIOPE_ADDR(0x9800d4)},
 	.usb2_ohci_int_mask = {.phys = CALLIOPE_ADDR(0x9A000c)},
@@ -90,12 +90,12 @@ const struct register_map calliope_register_map __initdata = {
 	.usb2_stbus_mess_size = {.phys = CALLIOPE_ADDR(0x9BFF04)},
 	.usb2_stbus_chunk_size = {.phys = CALLIOPE_ADDR(0x9BFF08)},
 
-	.pcie_regs = {.phys = 0x000000},      	/* -doesn't exist- */
+	.pcie_regs = {.phys = 0x000000},	/* -doesn't exist- */
 	.tim_ch = {.phys = CALLIOPE_ADDR(0xA02C10)},
 	.tim_cl = {.phys = CALLIOPE_ADDR(0xA02C14)},
 	.gpio_dout = {.phys = CALLIOPE_ADDR(0xA02c20)},
 	.gpio_din = {.phys = CALLIOPE_ADDR(0xA02c24)},
 	.gpio_dir = {.phys = CALLIOPE_ADDR(0xA02c2C)},
 	.watchdog = {.phys = CALLIOPE_ADDR(0xA02c30)},
-	.front_panel = {.phys = 0x000000},    	/* -not used- */
+	.front_panel = {.phys = 0x000000},	/* -not used- */
 };

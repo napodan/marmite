@@ -5,24 +5,25 @@
  * Modified from arch/mips/kernel/irq-rm7000.c:
  * Copyright (C) 2003 Ralf Baechle
  *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
+ * This program is free software; you can redistribute	it and/or modify it
+ * under  the terms of	the GNU General	 Public License as published by the
  * Free Software Foundation;  either version 2 of the  License, or (at your
  * option) any later version.
  */
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
+#include <linux/irq.h>
 
 #include <asm/irq_cpu.h>
 #include <asm/mipsregs.h>
-#include <asm/system.h>
 
 #include <asm/mach-powertv/asic_regs.h>
 
-static inline void unmask_asic_irq(unsigned int irq)
+static inline void unmask_asic_irq(struct irq_data *d)
 {
 	unsigned long enable_bit;
+	unsigned int irq = d->irq;
 
 	enable_bit = (1 << (irq & 0x1f));
 
@@ -44,9 +45,10 @@ static inline void unmask_asic_irq(unsigned int irq)
 	}
 }
 
-static inline void mask_asic_irq(unsigned int irq)
+static inline void mask_asic_irq(struct irq_data *d)
 {
 	unsigned long disable_mask;
+	unsigned int irq = d->irq;
 
 	disable_mask = ~(1 << (irq & 0x1f));
 
@@ -70,11 +72,8 @@ static inline void mask_asic_irq(unsigned int irq)
 
 static struct irq_chip asic_irq_chip = {
 	.name = "ASIC Level",
-	.ack = mask_asic_irq,
-	.mask = mask_asic_irq,
-	.mask_ack = mask_asic_irq,
-	.unmask = unmask_asic_irq,
-	.eoi = unmask_asic_irq,
+	.irq_mask = mask_asic_irq,
+	.irq_unmask = unmask_asic_irq,
 };
 
 void __init asic_irq_init(void)
@@ -112,5 +111,5 @@ void __init asic_irq_init(void)
 	 * Initialize interrupt handlers.
 	 */
 	for (i = 0; i < NR_IRQS; i++)
-		set_irq_chip_and_handler(i, &asic_irq_chip, handle_level_irq);
+		irq_set_chip_and_handler(i, &asic_irq_chip, handle_level_irq);
 }

@@ -35,7 +35,7 @@ pte_t *huge_pte_alloc(struct mm_struct *mm,
 		if (pud) {
 			pmd = pmd_alloc(mm, pud, addr);
 			if (pmd)
-				pte = pte_alloc_map(mm, pmd, addr);
+				pte = pte_alloc_map(mm, NULL, pmd, addr);
 		}
 	}
 
@@ -79,6 +79,11 @@ int pmd_huge(pmd_t pmd)
 }
 
 int pud_huge(pud_t pud)
+{
+	return 0;
+}
+
+int pmd_huge_support(void)
 {
 	return 0;
 }

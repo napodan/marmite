@@ -27,9 +27,9 @@
 #include <linux/io.h>
 #include <linux/spinlock.h>
 
-#include <asm/system.h>
+#include <mach/hardware.h>
 
-#include <plat/mux.h>
+#include <mach/mux.h>
 
 #ifdef CONFIG_OMAP_MUX
 
@@ -70,6 +70,10 @@ MUX_CFG_7XX("SPI_7XX_3",           6,   13,    4,   12,   1, 0)
 MUX_CFG_7XX("SPI_7XX_4",           6,   17,    4,   16,   1, 0)
 MUX_CFG_7XX("SPI_7XX_5",           8,   25,    0,   24,   0, 0)
 MUX_CFG_7XX("SPI_7XX_6",           9,    5,    0,    4,   0, 0)
+
+/* UART pins */
+MUX_CFG_7XX("UART_7XX_1",          3,   21,    0,   20,   0, 0)
+MUX_CFG_7XX("UART_7XX_2",          8,    1,    6,    0,   0, 0)
 };
 #define OMAP7XX_PINS_SZ		ARRAY_SIZE(omap7xx_pins)
 #else
@@ -339,7 +343,7 @@ MUX_CFG("Y14_1610_CCP_DATAM",	 9,   21,    6,   2,   3,   1,    2,     0,  0)
 #define OMAP1XXX_PINS_SZ	0
 #endif	/* CONFIG_ARCH_OMAP15XX || CONFIG_ARCH_OMAP16XX */
 
-int __init_or_module omap1_cfg_reg(const struct pin_config *cfg)
+static int __init_or_module omap1_cfg_reg(const struct pin_config *cfg)
 {
 	static DEFINE_SPINLOCK(mux_spin_lock);
 	unsigned long flags;
@@ -440,12 +444,62 @@ int __init_or_module omap1_cfg_reg(const struct pin_config *cfg)
 	}
 #endif
 
-#ifdef CONFIG_OMAP_MUX_ERRORS
+#ifdef CONFIG_OMAP_MUX_WARNINGS
 	return warn ? -ETXTBSY : 0;
 #else
 	return 0;
 #endif
 }
+
+static struct omap_mux_cfg *mux_cfg;
+
+int __init omap_mux_register(struct omap_mux_cfg *arch_mux_cfg)
+{
+	if (!arch_mux_cfg || !arch_mux_cfg->pins || arch_mux_cfg->size == 0
+			|| !arch_mux_cfg->cfg_reg) {
+		printk(KERN_ERR "Invalid pin table\n");
+		return -EINVAL;
+	}
+
+	mux_cfg = arch_mux_cfg;
+
+	return 0;
+}
+
+/*
+ * Sets the Omap MUX and PULL_DWN registers based on the table
+ */
+int __init_or_module omap_cfg_reg(const unsigned long index)
+{
+	struct pin_config *reg;
+
+	if (!cpu_class_is_omap1()) {
+		printk(KERN_ERR "mux: Broken omap_cfg_reg(%lu) entry\n",
+				index);
+		WARN_ON(1);
+		return -EINVAL;
+	}
+
+	if (mux_cfg == NULL) {
+		printk(KERN_ERR "Pin mux table not initialized\n");
+		return -ENODEV;
+	}
+
+	if (index >= mux_cfg->size) {
+		printk(KERN_ERR "Invalid pin mux index: %lu (%lu)\n",
+		       index, mux_cfg->size);
+		dump_stack();
+		return -ENODEV;
+	}
+
+	reg = &mux_cfg->pins[index];
+
+	if (!mux_cfg->cfg_reg)
+		return -ENODEV;
+
+	return mux_cfg->cfg_reg(reg);
+}
+EXPORT_SYMBOL(omap_cfg_reg);
 
 int __init omap1_mux_init(void)
 {
@@ -464,4 +518,8 @@ int __init omap1_mux_init(void)
 	return omap_mux_register(&arch_mux_cfg);
 }
 
-#endif
+#else
+#define omap_mux_init() do {} while(0)
+#define omap_cfg_reg(x)	do {} while(0)
+#endif	/* CONFIG_OMAP_MUX */
+

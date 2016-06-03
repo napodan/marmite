@@ -81,8 +81,6 @@ static int tosa_bt_probe(struct platform_device *dev)
 		goto err_rfk_alloc;
 	}
 
-	rfkill_set_led_trigger_name(rfk, "tosa-bt");
-
 	rc = rfkill_register(rfk);
 	if (rc)
 		goto err_rfkill;
@@ -104,7 +102,7 @@ err_reset:
 	return rc;
 }
 
-static int __devexit tosa_bt_remove(struct platform_device *dev)
+static int tosa_bt_remove(struct platform_device *dev)
 {
 	struct tosa_bt_data *data = dev->dev.platform_data;
 	struct rfkill *rfk = platform_get_drvdata(dev);
@@ -127,7 +125,7 @@ static int __devexit tosa_bt_remove(struct platform_device *dev)
 
 static struct platform_driver tosa_bt_driver = {
 	.probe = tosa_bt_probe,
-	.remove = __devexit_p(tosa_bt_remove),
+	.remove = tosa_bt_remove,
 
 	.driver = {
 		.name = "tosa-bt",

@@ -20,6 +20,7 @@
 #include <linux/threads.h>
 #include <linux/cpumask.h>
 #include <linux/kernel.h>
+#include <linux/irqreturn.h>
 
 #ifndef __ASSEMBLY__
 
@@ -29,22 +30,51 @@
 #include <asm/percpu.h>
 
 extern int boot_cpuid;
+extern int spinning_secondaries;
 
 extern void cpu_die(void);
 
 #ifdef CONFIG_SMP
 
-extern void smp_send_debugger_break(int cpu);
-extern void smp_message_recv(int);
+struct smp_ops_t {
+	void  (*message_pass)(int cpu, int msg);
+#ifdef CONFIG_PPC_SMP_MUXED_IPI
+	void  (*cause_ipi)(int cpu, unsigned long data);
+#endif
+	int   (*probe)(void);
+	int   (*kick_cpu)(int nr);
+	void  (*setup_cpu)(int nr);
+	void  (*bringup_done)(void);
+	void  (*take_timebase)(void);
+	void  (*give_timebase)(void);
+	int   (*cpu_disable)(void);
+	void  (*cpu_die)(unsigned int nr);
+	int   (*cpu_bootable)(unsigned int nr);
+};
+
+extern void smp_send_debugger_break(void);
+extern void start_secondary_resume(void);
+extern void smp_generic_give_timebase(void);
+extern void smp_generic_take_timebase(void);
 
 DECLARE_PER_CPU(unsigned int, cpu_pvr);
 
 #ifdef CONFIG_HOTPLUG_CPU
-extern void fixup_irqs(const struct cpumask *map);
+extern void migrate_irqs(void);
 int generic_cpu_disable(void);
-int generic_cpu_enable(unsigned int cpu);
 void generic_cpu_die(unsigned int cpu);
 void generic_mach_cpu_die(void);
+void generic_set_cpu_dead(unsigned int cpu);
+void generic_set_cpu_up(unsigned int cpu);
+int generic_check_cpu_restart(unsigned int cpu);
+
+extern void inhibit_secondary_onlining(void);
+extern void uninhibit_secondary_onlining(void);
+
+#else /* HOTPLUG_CPU */
+static inline void inhibit_secondary_onlining(void) {}
+static inline void uninhibit_secondary_onlining(void) {}
+
 #endif
 
 #ifdef CONFIG_PPC64
@@ -92,14 +122,15 @@ extern int cpu_to_core_id(int cpu);
 #define PPC_MSG_CALL_FUNC_SINGLE	2
 #define PPC_MSG_DEBUGGER_BREAK  3
 
-/*
- * irq controllers that have dedicated ipis per message and don't
- * need additional code in the action handler may use this
- */
+/* for irq controllers that have dedicated ipis per message (4) */
 extern int smp_request_message_ipi(int virq, int message);
 extern const char *smp_ipi_name[];
 
-void smp_init_iSeries(void);
+/* for irq controllers with only a single ipi */
+extern void smp_muxed_ipi_set_data(int cpu, unsigned long data);
+extern void smp_muxed_ipi_message_pass(int cpu, int msg);
+extern irqreturn_t smp_ipi_demux(void);
+
 void smp_init_pSeries(void);
 void smp_init_cell(void);
 void smp_init_celleb(void);
@@ -112,6 +143,12 @@ extern void __cpu_die(unsigned int cpu);
 /* for UP */
 #define hard_smp_processor_id()		get_hard_smp_processor_id(0)
 #define smp_setup_cpu_maps()
+static inline void inhibit_secondary_onlining(void) {}
+static inline void uninhibit_secondary_onlining(void) {}
+static inline const struct cpumask *cpu_sibling_mask(int cpu)
+{
+	return cpumask_of(cpu);
+}
 
 #endif /* CONFIG_SMP */
 
@@ -148,7 +185,7 @@ extern int smt_enabled_at_boot;
 
 extern int smp_mpic_probe(void);
 extern void smp_mpic_setup_cpu(int cpu);
-extern void smp_generic_kick_cpu(int nr);
+extern int smp_generic_kick_cpu(int nr);
 
 extern void smp_generic_give_timebase(void);
 extern void smp_generic_take_timebase(void);
@@ -168,6 +205,7 @@ extern unsigned long __secondary_hold_spinloop;
 extern unsigned long __secondary_hold_acknowledge;
 extern char __secondary_hold;
 
+extern void __early_start(void);
 #endif /* __ASSEMBLY__ */
 
 #endif /* __KERNEL__ */

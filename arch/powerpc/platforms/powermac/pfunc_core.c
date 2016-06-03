@@ -686,7 +686,7 @@ static int pmf_add_functions(struct pmf_device *dev, void *driverdata)
 	int count = 0;
 
 	for (pp = dev->node->properties; pp != 0; pp = pp->next) {
-		char *name;
+		const char *name;
 		if (strncmp(pp->name, PP_PREFIX, plen) != 0)
 			continue;
 		name = pp->name + plen;
@@ -837,8 +837,10 @@ struct pmf_function *__pmf_find_function(struct device_node *target,
 		return NULL;
  find_it:
 	dev = pmf_find_device(actor);
-	if (dev == NULL)
-		return NULL;
+	if (dev == NULL) {
+		result = NULL;
+		goto out;
+	}
 
 	list_for_each_entry(func, &dev->functions, link) {
 		if (name && strcmp(name, func->name))
@@ -850,8 +852,9 @@ struct pmf_function *__pmf_find_function(struct device_node *target,
 		result = func;
 		break;
 	}
-	of_node_put(actor);
 	pmf_put_device(dev);
+out:
+	of_node_put(actor);
 	return result;
 }
 

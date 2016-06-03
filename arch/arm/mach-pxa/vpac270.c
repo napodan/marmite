@@ -16,7 +16,6 @@
 #include <linux/gpio_keys.h>
 #include <linux/input.h>
 #include <linux/gpio.h>
-#include <linux/sysdev.h>
 #include <linux/usb/gpio_vbus.h>
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/partitions.h>
@@ -25,6 +24,8 @@
 #include <linux/dm9000.h>
 #include <linux/ucb1400.h>
 #include <linux/ata_platform.h>
+#include <linux/regulator/max1586.h>
+#include <linux/i2c/pxa-i2c.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
@@ -32,13 +33,12 @@
 #include <mach/pxa27x.h>
 #include <mach/audio.h>
 #include <mach/vpac270.h>
-#include <mach/mmc.h>
-#include <mach/pxafb.h>
-#include <mach/ohci.h>
+#include <linux/platform_data/mmc-pxamci.h>
+#include <linux/platform_data/video-pxafb.h>
+#include <linux/platform_data/usb-ohci-pxa27x.h>
 #include <mach/pxa27x-udc.h>
 #include <mach/udc.h>
-
-#include <plat/i2c.h>
+#include <linux/platform_data/ata-pxa.h>
 
 #include "generic.h"
 #include "devices.h"
@@ -238,6 +238,7 @@ static void __init vpac270_onenand_init(void) {}
 #if defined(CONFIG_MMC_PXA) || defined(CONFIG_MMC_PXA_MODULE)
 static struct pxamci_platform_data vpac270_mci_platform_data = {
 	.ocr_mask		= MMC_VDD_32_33 | MMC_VDD_33_34,
+	.gpio_power		= -1,
 	.gpio_card_detect	= GPIO53_VPAC270_SD_DETECT_N,
 	.gpio_card_ro		= GPIO52_VPAC270_SD_READONLY,
 	.detect_delay_ms	= 200,
@@ -342,7 +343,7 @@ static inline void vpac270_uhc_init(void) {}
 /******************************************************************************
  * USB Gadget
  ******************************************************************************/
-#if defined(CONFIG_USB_GADGET_PXA27X)||defined(CONFIG_USB_GADGET_PXA27X_MODULE)
+#if defined(CONFIG_USB_PXA27X)||defined(CONFIG_USB_PXA27X_MODULE)
 static struct gpio_vbus_mach_info vpac270_gpio_vbus_info = {
 	.gpio_vbus		= GPIO41_VPAC270_UDC_DETECT,
 	.gpio_pullup		= -1,
@@ -394,8 +395,8 @@ static struct resource vpac270_dm9000_resources[] = {
 		.flags	= IORESOURCE_MEM,
 	},
 	[2] = {
-		.start	= IRQ_GPIO(GPIO114_VPAC270_ETH_IRQ),
-		.end	= IRQ_GPIO(GPIO114_VPAC270_ETH_IRQ),
+		.start	= PXA_GPIO_TO_IRQ(GPIO114_VPAC270_ETH_IRQ),
+		.end	= PXA_GPIO_TO_IRQ(GPIO114_VPAC270_ETH_IRQ),
 		.flags	= IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHEDGE,
 	},
 };
@@ -432,7 +433,7 @@ static pxa2xx_audio_ops_t vpac270_ac97_pdata = {
 };
 
 static struct ucb1400_pdata vpac270_ucb1400_pdata = {
-	.irq		= IRQ_GPIO(GPIO113_VPAC270_TS_IRQ),
+	.irq		= PXA_GPIO_TO_IRQ(GPIO113_VPAC270_TS_IRQ),
 };
 
 static struct platform_device vpac270_ucb1400_device = {
@@ -464,7 +465,6 @@ static struct i2c_board_info __initdata vpac270_i2c_devs[] = {
 
 static void __init vpac270_rtc_init(void)
 {
-	pxa_set_i2c_info(NULL);
 	i2c_register_board_info(0, ARRAY_AND_SIZE(vpac270_i2c_devs));
 }
 #else
@@ -492,7 +492,55 @@ static struct pxafb_mode_info vpac270_lcd_modes[] = {
 	.vsync_len	= 2,
 
 	.sync		= FB_SYNC_HOR_HIGH_ACT | FB_SYNC_VERT_HIGH_ACT,
-},
+}, {	/* CRT 640x480 */
+	.pixclock	= 35000,
+	.xres		= 640,
+	.yres		= 480,
+	.bpp		= 16,
+	.depth		= 16,
+
+	.left_margin	= 96,
+	.right_margin	= 48,
+	.upper_margin	= 33,
+	.lower_margin	= 10,
+
+	.hsync_len	= 48,
+	.vsync_len	= 1,
+
+	.sync		= FB_SYNC_HOR_HIGH_ACT | FB_SYNC_VERT_HIGH_ACT,
+}, {	/* CRT 800x600 H=30kHz V=48HZ */
+	.pixclock	= 25000,
+	.xres		= 800,
+	.yres		= 600,
+	.bpp		= 16,
+	.depth		= 16,
+
+	.left_margin	= 50,
+	.right_margin	= 1,
+	.upper_margin	= 21,
+	.lower_margin	= 12,
+
+	.hsync_len	= 8,
+	.vsync_len	= 1,
+
+	.sync		= FB_SYNC_HOR_HIGH_ACT | FB_SYNC_VERT_HIGH_ACT,
+}, {	/* CRT 1024x768 H=40kHz V=50Hz */
+	.pixclock	= 15000,
+	.xres		= 1024,
+	.yres		= 768,
+	.bpp		= 16,
+	.depth		= 16,
+
+	.left_margin	= 220,
+	.right_margin	= 8,
+	.upper_margin	= 33,
+	.lower_margin	= 2,
+
+	.hsync_len	= 48,
+	.vsync_len	= 1,
+
+	.sync		= FB_SYNC_HOR_HIGH_ACT | FB_SYNC_VERT_HIGH_ACT,
+}
 };
 
 static struct pxafb_mach_info vpac270_lcd_screen = {
@@ -523,7 +571,7 @@ static void __init vpac270_lcd_init(void)
 	}
 
 	vpac270_lcd_screen.pxafb_lcd_power = vpac270_lcd_power;
-	set_pxa_fb_info(&vpac270_lcd_screen);
+	pxa_set_fb_info(NULL, &vpac270_lcd_screen);
 	return;
 
 err2:
@@ -538,9 +586,10 @@ static inline void vpac270_lcd_init(void) {}
 /******************************************************************************
  * PATA IDE
  ******************************************************************************/
-#if defined(CONFIG_PATA_PLATFORM) || defined(CONFIG_PATA_PLATFORM_MODULE)
-static struct pata_platform_info vpac270_pata_pdata = {
-	.ioport_shift	= 1,
+#if defined(CONFIG_PATA_PXA) || defined(CONFIG_PATA_PXA_MODULE)
+static struct pata_pxa_pdata vpac270_pata_pdata = {
+	.reg_shift	= 1,
+	.dma_dreq	= 1,
 	.irq_flags	= IRQF_TRIGGER_RISING,
 };
 
@@ -555,19 +604,25 @@ static struct resource vpac270_ide_resources[] = {
 	       .end	= PXA_CS3_PHYS + 0x15f,
 	       .flags	= IORESOURCE_MEM
 	},
-	[2] = {	/* IDE IRQ pin */
-	       .start	= gpio_to_irq(GPIO36_VPAC270_IDE_IRQ),
-	       .end	= gpio_to_irq(GPIO36_VPAC270_IDE_IRQ),
+	[2] = {	/* DMA Base address */
+	       .start	= PXA_CS3_PHYS + 0x20,
+	       .end	= PXA_CS3_PHYS + 0x2f,
+	       .flags	= IORESOURCE_DMA
+	},
+	[3] = {	/* IDE IRQ pin */
+	       .start	= PXA_GPIO_TO_IRQ(GPIO36_VPAC270_IDE_IRQ),
+	       .end	= PXA_GPIO_TO_IRQ(GPIO36_VPAC270_IDE_IRQ),
 	       .flags	= IORESOURCE_IRQ
 	}
 };
 
 static struct platform_device vpac270_ide_device = {
-	.name		= "pata_platform",
+	.name		= "pata_pxa",
 	.num_resources	= ARRAY_SIZE(vpac270_ide_resources),
 	.resource	= vpac270_ide_resources,
 	.dev		= {
 		.platform_data	= &vpac270_pata_pdata,
+		.coherent_dma_mask	= 0xffffffff,
 	}
 };
 
@@ -580,6 +635,57 @@ static inline void vpac270_ide_init(void) {}
 #endif
 
 /******************************************************************************
+ * Core power regulator
+ ******************************************************************************/
+#if defined(CONFIG_REGULATOR_MAX1586) || \
+    defined(CONFIG_REGULATOR_MAX1586_MODULE)
+static struct regulator_consumer_supply vpac270_max1587a_consumers[] = {
+	REGULATOR_SUPPLY("vcc_core", NULL),
+};
+
+static struct regulator_init_data vpac270_max1587a_v3_info = {
+	.constraints = {
+		.name		= "vcc_core range",
+		.min_uV		= 900000,
+		.max_uV		= 1705000,
+		.always_on	= 1,
+		.valid_ops_mask	= REGULATOR_CHANGE_VOLTAGE,
+	},
+	.consumer_supplies	= vpac270_max1587a_consumers,
+	.num_consumer_supplies	= ARRAY_SIZE(vpac270_max1587a_consumers),
+};
+
+static struct max1586_subdev_data vpac270_max1587a_subdevs[] = {
+	{
+		.name		= "vcc_core",
+		.id		= MAX1586_V3,
+		.platform_data	= &vpac270_max1587a_v3_info,
+	}
+};
+
+static struct max1586_platform_data vpac270_max1587a_info = {
+	.subdevs     = vpac270_max1587a_subdevs,
+	.num_subdevs = ARRAY_SIZE(vpac270_max1587a_subdevs),
+	.v3_gain     = MAX1586_GAIN_R24_3k32, /* 730..1550 mV */
+};
+
+static struct i2c_board_info __initdata vpac270_pi2c_board_info[] = {
+	{
+		I2C_BOARD_INFO("max1586", 0x14),
+		.platform_data	= &vpac270_max1587a_info,
+	},
+};
+
+static void __init vpac270_pmic_init(void)
+{
+	i2c_register_board_info(1, ARRAY_AND_SIZE(vpac270_pi2c_board_info));
+}
+#else
+static inline void vpac270_pmic_init(void) {}
+#endif
+
+
+/******************************************************************************
  * Machine init
  ******************************************************************************/
 static void __init vpac270_init(void)
@@ -589,7 +695,10 @@ static void __init vpac270_init(void)
 	pxa_set_ffuart_info(NULL);
 	pxa_set_btuart_info(NULL);
 	pxa_set_stuart_info(NULL);
+	pxa_set_i2c_info(NULL);
+	pxa27x_set_i2c_power_info(NULL);
 
+	vpac270_pmic_init();
 	vpac270_lcd_init();
 	vpac270_mmc_init();
 	vpac270_nor_init();
@@ -605,11 +714,12 @@ static void __init vpac270_init(void)
 }
 
 MACHINE_START(VPAC270, "Voipac PXA270")
-	.phys_io	= 0x40000000,
-	.io_pg_offst	= (io_p2v(0x40000000) >> 18) & 0xfffc,
-	.boot_params	= 0xa0000100,
-	.map_io		= pxa_map_io,
+	.atag_offset	= 0x100,
+	.map_io		= pxa27x_map_io,
+	.nr_irqs	= PXA_NR_IRQS,
 	.init_irq	= pxa27x_init_irq,
-	.timer		= &pxa_timer,
-	.init_machine	= vpac270_init
+	.handle_irq	= pxa27x_handle_irq,
+	.init_time	= pxa_timer_init,
+	.init_machine	= vpac270_init,
+	.restart	= pxa_restart,
 MACHINE_END

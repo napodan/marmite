@@ -5,7 +5,7 @@
  *
  * SGI ARCS firmware interface library for the Linux kernel.
  *
- * Copyright (C) 1996 David S. Miller (dm@engr.sgi.com)
+ * Copyright (C) 1996 David S. Miller (davem@davemloft.net)
  * Copyright (C) 2001, 2002 Ralf Baechle (ralf@gnu.org)
  */
 #ifndef _ASM_SGIALIB_H
@@ -37,7 +37,7 @@ extern char prom_getchar(void);
  * in chain is CURR is NULL.
  */
 extern struct linux_mdesc *prom_getmdesc(struct linux_mdesc *curr);
-#define PROM_NULL_MDESC   ((struct linux_mdesc *) 0)
+#define PROM_NULL_MDESC	  ((struct linux_mdesc *) 0)
 
 /* Called by prom_init to setup the physical memory pmemblock
  * array.

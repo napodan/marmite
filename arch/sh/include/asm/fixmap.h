@@ -58,7 +58,7 @@ enum fixed_addresses {
 
 #ifdef CONFIG_HIGHMEM
 	FIX_KMAP_BEGIN,	/* reserved pte's for temporary kernel mappings */
-	FIX_KMAP_END = FIX_KMAP_BEGIN+(KM_TYPE_NR*NR_CPUS)-1,
+	FIX_KMAP_END = FIX_KMAP_BEGIN + (KM_TYPE_NR * NR_CPUS) - 1,
 #endif
 
 #ifdef CONFIG_IOREMAP_FIXED
@@ -69,7 +69,7 @@ enum fixed_addresses {
 	 */
 #define FIX_N_IOREMAPS	32
 	FIX_IOREMAP_BEGIN,
-	FIX_IOREMAP_END = FIX_IOREMAP_BEGIN + FIX_N_IOREMAPS,
+	FIX_IOREMAP_END = FIX_IOREMAP_BEGIN + FIX_N_IOREMAPS - 1,
 #endif
 
 	__end_of_fixed_addresses
@@ -96,7 +96,7 @@ extern void __clear_fixmap(enum fixed_addresses idx, pgprot_t flags);
 #ifdef CONFIG_SUPERH32
 #define FIXADDR_TOP	(P4SEG - PAGE_SIZE)
 #else
-#define FIXADDR_TOP	(0xff000000 - PAGE_SIZE)
+#define FIXADDR_TOP	((unsigned long)(-PAGE_SIZE))
 #endif
 #define FIXADDR_SIZE	(__end_of_fixed_addresses << PAGE_SHIFT)
 #define FIXADDR_START	(FIXADDR_TOP - FIXADDR_SIZE)

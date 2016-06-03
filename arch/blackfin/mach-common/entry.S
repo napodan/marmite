@@ -25,13 +25,6 @@
 
 #include <asm/context.S>
 
-#if defined(CONFIG_BFIN_SCRATCH_REG_RETN)
-# define EX_SCRATCH_REG RETN
-#elif defined(CONFIG_BFIN_SCRATCH_REG_RETE)
-# define EX_SCRATCH_REG RETE
-#else
-# define EX_SCRATCH_REG CYCLES
-#endif
 
 #ifdef CONFIG_EXCPT_IRQ_SYSC_L1
 .section .l1.text
@@ -268,7 +261,7 @@ ENTRY(_handle_bad_cplb)
 	/* To get here, we just tried and failed to change a CPLB
 	 * so, handle things in trap_c (C code), by lowering to
 	 * IRQ5, just like we normally do. Since this is not a
-	 * "normal" return path, we have a do alot of stuff to
+	 * "normal" return path, we have a do a lot of stuff to
 	 * the stack to get ready so, we can fall through - we
 	 * need to make a CPLB exception look like a normal exception
 	 */
@@ -537,61 +530,6 @@ ENTRY(_trap) /* Exception: 4th entry into system event table(supervisor mode)*/
 	jump .Lsyscall_really_exit;
 ENDPROC(_trap)
 
-ENTRY(_kernel_execve)
-	link SIZEOF_PTREGS;
-	p0 = sp;
-	r3 = SIZEOF_PTREGS / 4;
-	r4 = 0(x);
-.Lclear_regs:
-	[p0++] = r4;
-	r3 += -1;
-	cc = r3 == 0;
-	if !cc jump .Lclear_regs (bp);
-
-	p0 = sp;
-	sp += -16;
-	[sp + 12] = p0;
-	pseudo_long_call _do_execve, p5;
-	SP += 16;
-	cc = r0 == 0;
-	if ! cc jump .Lexecve_failed;
-	/* Success.  Copy our temporary pt_regs to the top of the kernel
-	 * stack and do a normal exception return.
-	 */
-	r1 = sp;
-	r0 = (-KERNEL_STACK_SIZE) (x);
-	r1 = r1 & r0;
-	p2 = r1;
-	p3 = [p2];
-	r0 = KERNEL_STACK_SIZE - 4 (z);
-	p1 = r0;
-	p1 = p1 + p2;
-
-	p0 = fp;
-	r4 = [p0--];
-	r3 = SIZEOF_PTREGS / 4;
-.Lcopy_regs:
-	r4 = [p0--];
-	[p1--] = r4;
-	r3 += -1;
-	cc = r3 == 0;
-	if ! cc jump .Lcopy_regs (bp);
-
-	r0 = (KERNEL_STACK_SIZE - SIZEOF_PTREGS) (z);
-	p1 = r0;
-	p1 = p1 + p2;
-	sp = p1;
-	r0 = syscfg;
-	[SP + PT_SYSCFG] = r0;
-	[p3 + (TASK_THREAD + THREAD_KSP)] = sp;
-
-	RESTORE_CONTEXT;
-	rti;
-.Lexecve_failed:
-	unlink;
-	rts;
-ENDPROC(_kernel_execve)
-
 ENTRY(_system_call)
 	/* Store IPEND */
 	p2.l = lo(IPEND);
@@ -615,7 +553,7 @@ ENTRY(_system_call)
 #ifdef CONFIG_IPIPE
 	r0 = sp;
 	SP += -12;
-	call ___ipipe_syscall_root;
+	pseudo_long_call ___ipipe_syscall_root, p0;
 	SP += 12;
 	cc = r0 == 1;
 	if cc jump .Lsyscall_really_exit;
@@ -692,7 +630,7 @@ ENTRY(_system_call)
 	[--sp] = reti;
 	SP += 4; /* don't merge with next insn to keep the pattern obvious */
 	SP += -12;
-	call ___ipipe_sync_root;
+	pseudo_long_call ___ipipe_sync_root, p4;
 	SP += 12;
 	jump .Lresume_userspace_1;
 .Lsyscall_no_irqsync:
@@ -711,8 +649,6 @@ ENTRY(_system_call)
 	jump .Lresume_userspace_1;
 
 .Lsyscall_sigpending:
-	cc = BITTST(r7, TIF_RESTORE_SIGMASK);
-	if cc jump .Lsyscall_do_signals;
 	cc = BITTST(r7, TIF_SIGPENDING);
 	if cc jump .Lsyscall_do_signals;
 	cc = BITTST(r7, TIF_NOTIFY_RESUME);
@@ -817,7 +753,7 @@ _new_old_task:
 	rets = [sp++];
 
 	/*
-	 * When we come out of resume, r0 carries "old" task, becuase we are
+	 * When we come out of resume, r0 carries "old" task, because we are
 	 * in "new" task.
 	 */
 	rts;
@@ -889,11 +825,80 @@ ENTRY(_ret_from_exception)
 	rts;
 ENDPROC(_ret_from_exception)
 
+#if defined(CONFIG_PREEMPT)
+
+ENTRY(_up_to_irq14)
+#if ANOMALY_05000281 || ANOMALY_05000461
+	r0.l = lo(SAFE_USER_INSTRUCTION);
+	r0.h = hi(SAFE_USER_INSTRUCTION);
+	reti = r0;
+#endif
+
+#ifdef CONFIG_DEBUG_HWERR
+	/* enable irq14 & hwerr interrupt, until we transition to _evt_evt14 */
+	r0 = (EVT_IVG14 | EVT_IVHW | EVT_IRPTEN | EVT_EVX | EVT_NMI | EVT_RST | EVT_EMU);
+#else
+	/* Only enable irq14 interrupt, until we transition to _evt_evt14 */
+	r0 = (EVT_IVG14 | EVT_IRPTEN | EVT_EVX | EVT_NMI | EVT_RST | EVT_EMU);
+#endif
+	sti r0;
+
+	p0.l = lo(EVT14);
+	p0.h = hi(EVT14);
+	p1.l = _evt_up_evt14;
+	p1.h = _evt_up_evt14;
+	[p0] = p1;
+	csync;
+
+	raise 14;
+1:
+	jump 1b;
+ENDPROC(_up_to_irq14)
+
+ENTRY(_evt_up_evt14)
+#ifdef CONFIG_DEBUG_HWERR
+	r0 = (EVT_IVHW | EVT_IRPTEN | EVT_EVX | EVT_NMI | EVT_RST | EVT_EMU);
+	sti r0;
+#else
+	cli r0;
+#endif
+#ifdef CONFIG_TRACE_IRQFLAGS
+	[--sp] = rets;
+	sp += -12;
+	call _trace_hardirqs_off;
+	sp += 12;
+	rets = [sp++];
+#endif
+	[--sp] = RETI;
+	SP += 4;
+
+	/* restore normal evt14 */
+	p0.l = lo(EVT14);
+	p0.h = hi(EVT14);
+	p1.l = _evt_evt14;
+	p1.h = _evt_evt14;
+	[p0] = p1;
+	csync;
+
+	rts;
+ENDPROC(_evt_up_evt14)
+
+#endif
+
 #ifdef CONFIG_IPIPE
 
 _resume_kernel_from_int:
+	r1 = LO(~0x8000) (Z);
+	r1 = r0 & r1;
+	r0 = 1;
+	r0 = r1 - r0;
+	r2 = r1 & r0;
+	cc = r2 == 0;
+	/* Sync the root stage only from the outer interrupt level. */
+	if !cc jump .Lnosync;
 	r0.l = ___ipipe_sync_root;
 	r0.h = ___ipipe_sync_root;
+	[--sp] = reti;
 	[--sp] = rets;
 	[--sp] = ( r7:4, p5:3 );
 	SP += -12;
@@ -901,9 +906,57 @@ _resume_kernel_from_int:
 	SP += 12;
 	( r7:4, p5:3 ) = [sp++];
 	rets = [sp++];
+	reti = [sp++];
+.Lnosync:
 	rts
+#elif defined(CONFIG_PREEMPT)
+
+_resume_kernel_from_int:
+	/* check preempt_count */
+	r7 = sp;
+	r4.l = lo(ALIGN_PAGE_MASK);
+	r4.h = hi(ALIGN_PAGE_MASK);
+	r7 = r7 & r4;
+	p5 = r7;
+	r7 = [p5 + TI_PREEMPT];
+	cc = r7 == 0x0;
+	if !cc jump .Lreturn_to_kernel;
+.Lneed_schedule:
+	r7 = [p5 + TI_FLAGS];
+	r4.l = lo(_TIF_WORK_MASK);
+	r4.h = hi(_TIF_WORK_MASK);
+	r7 =  r7 & r4;
+	cc = BITTST(r7, TIF_NEED_RESCHED);
+	if !cc jump .Lreturn_to_kernel;
+	/*
+	 * let schedule done at level 15, otherwise sheduled process will run
+	 * at high level and block low level interrupt
+	 */
+	r6 = reti;  /* save reti */
+	r5.l = .Lkernel_schedule;
+	r5.h = .Lkernel_schedule;
+	reti = r5;
+	rti;
+.Lkernel_schedule:
+	[--sp] = rets;
+	sp += -12;
+	pseudo_long_call _preempt_schedule_irq, p4;
+	sp += 12;
+	rets = [sp++];
+
+	[--sp] = rets;
+	sp += -12;
+	/* up to irq14 so that reti after restore_all can return to irq15(kernel) */
+	pseudo_long_call _up_to_irq14, p4;
+	sp += 12;
+	rets = [sp++];
+
+	reti = r6; /* restore reti so that origin process can return to interrupted point */
+
+	jump .Lneed_schedule;
 #else
-#define _resume_kernel_from_int	 2f
+
+#define _resume_kernel_from_int	.Lreturn_to_kernel
 #endif
 
 ENTRY(_return_from_int)
@@ -913,7 +966,7 @@ ENTRY(_return_from_int)
 	p2.h = hi(ILAT);
 	r0 = [p2];
 	cc = bittst (r0, EVT_IVG15_P);
-	if cc jump 2f;
+	if cc jump .Lreturn_to_kernel;
 
 	/* if not return to user mode, get out */
 	p2.l = lo(IPEND);
@@ -945,7 +998,7 @@ ENTRY(_return_from_int)
 	STI r0;
 	raise 15;	/* raise evt15 to do signal or reschedule */
 	rti;
-2:
+.Lreturn_to_kernel:
 	rts;
 ENDPROC(_return_from_int)
 
@@ -1024,7 +1077,8 @@ ENTRY(_schedule_and_signal_from_int)
 	sti r0;
 
 	/* finish the userspace "atomic" functions for it */
-	r1 = FIXED_CODE_END;
+	r1.l = lo(FIXED_CODE_END);
+	r1.h = hi(FIXED_CODE_END);
 	r2 = [sp + PT_PC];
 	cc = r1 <= r2;
 	if cc jump .Lresume_userspace (bp);
@@ -1127,7 +1181,7 @@ ENTRY(_software_trace_buff)
 	.endr
 #endif /* CONFIG_DEBUG_BFIN_HWTRACE_EXPAND */
 
-#if CONFIG_EARLY_PRINTK
+#ifdef CONFIG_EARLY_PRINTK
 __INIT
 ENTRY(_early_trap)
 	SAVE_ALL_SYS
@@ -1259,7 +1313,7 @@ END(_ex_table)
 ENTRY(_sys_call_table)
 	.long _sys_restart_syscall	/* 0 */
 	.long _sys_exit
-	.long _sys_fork
+	.long _sys_ni_syscall	/* fork */
 	.long _sys_read
 	.long _sys_write
 	.long _sys_open		/* 5 */
@@ -1377,7 +1431,7 @@ ENTRY(_sys_call_table)
 	.long _sys_ni_syscall	/* old sys_ipc */
 	.long _sys_fsync
 	.long _sys_ni_syscall	/* old sys_sigreturn */
-	.long _sys_clone		/* 120 */
+	.long _bfin_clone		/* 120 */
 	.long _sys_setdomainname
 	.long _sys_newuname
 	.long _sys_ni_syscall	/* old sys_modify_ldt */
@@ -1426,7 +1480,7 @@ ENTRY(_sys_call_table)
 	.long _sys_ni_syscall	/* for vm86 */
 	.long _sys_ni_syscall	/* old "query_module" */
 	.long _sys_ni_syscall	/* sys_poll */
-	.long _sys_nfsservctl
+	.long _sys_ni_syscall   /* old nfsservctl */
 	.long _sys_setresgid	/* setresgid16 */	/* 170 */
 	.long _sys_getresgid	/* getresgid16 */
 	.long _sys_prctl
@@ -1628,6 +1682,18 @@ ENTRY(_sys_call_table)
 	.long _sys_rt_tgsigqueueinfo
 	.long _sys_perf_event_open
 	.long _sys_recvmmsg		/* 370 */
+	.long _sys_fanotify_init
+	.long _sys_fanotify_mark
+	.long _sys_prlimit64
+	.long _sys_cacheflush
+	.long _sys_name_to_handle_at	/* 375 */
+	.long _sys_open_by_handle_at
+	.long _sys_clock_adjtime
+	.long _sys_syncfs
+	.long _sys_setns
+	.long _sys_sendmmsg		/* 380 */
+	.long _sys_process_vm_readv
+	.long _sys_process_vm_writev
 
 	.rept NR_syscalls-(.-_sys_call_table)/4
 	.long _sys_ni_syscall

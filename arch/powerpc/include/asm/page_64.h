@@ -59,38 +59,10 @@ static __inline__ void clear_page(void *addr)
 	: "ctr", "memory");
 }
 
-extern void copy_4K_page(void *to, void *from);
-
-#ifdef CONFIG_PPC_64K_PAGES
-static inline void copy_page(void *to, void *from)
-{
-	unsigned int i;
-	for (i=0; i < (1 << (PAGE_SHIFT - 12)); i++) {
-		copy_4K_page(to, from);
-		to += 4096;
-		from += 4096;
-	}
-}
-#else /* CONFIG_PPC_64K_PAGES */
-static inline void copy_page(void *to, void *from)
-{
-	copy_4K_page(to, from);
-}
-#endif /* CONFIG_PPC_64K_PAGES */
+extern void copy_page(void *to, void *from);
 
 /* Log 2 of page table size */
 extern u64 ppc64_pft_size;
-
-/* Large pages size */
-#ifdef CONFIG_HUGETLB_PAGE
-extern unsigned int HPAGE_SHIFT;
-#else
-#define HPAGE_SHIFT PAGE_SHIFT
-#endif
-#define HPAGE_SIZE		((1UL) << HPAGE_SHIFT)
-#define HPAGE_MASK		(~(HPAGE_SIZE - 1))
-#define HUGETLB_PAGE_ORDER	(HPAGE_SHIFT - PAGE_SHIFT)
-#define HUGE_MAX_HSTATE		(MMU_PAGE_COUNT-1)
 
 #endif /* __ASSEMBLY__ */
 
@@ -106,11 +78,19 @@ extern unsigned int HPAGE_SHIFT;
 #define GET_LOW_SLICE_INDEX(addr)	((addr) >> SLICE_LOW_SHIFT)
 #define GET_HIGH_SLICE_INDEX(addr)	((addr) >> SLICE_HIGH_SHIFT)
 
+/*
+ * 1 bit per slice and we have one slice per 1TB
+ * Right now we support only 64TB.
+ * IF we change this we will have to change the type
+ * of high_slices
+ */
+#define SLICE_MASK_SIZE 8
+
 #ifndef __ASSEMBLY__
 
 struct slice_mask {
 	u16 low_slices;
-	u16 high_slices;
+	u64 high_slices;
 };
 
 struct mm_struct;
@@ -119,8 +99,7 @@ extern unsigned long slice_get_unmapped_area(unsigned long addr,
 					     unsigned long len,
 					     unsigned long flags,
 					     unsigned int psize,
-					     int topdown,
-					     int use_cache);
+					     int topdown);
 
 extern unsigned int get_slice_psize(struct mm_struct *mm,
 				    unsigned long addr);
@@ -130,7 +109,7 @@ extern void slice_set_user_psize(struct mm_struct *mm, unsigned int psize);
 extern void slice_set_range_psize(struct mm_struct *mm, unsigned long start,
 				  unsigned long len, unsigned int psize);
 
-#define slice_mm_new_context(mm)	((mm)->context.id == 0)
+#define slice_mm_new_context(mm)	((mm)->context.id == MMU_NO_CONTEXT)
 
 #endif /* __ASSEMBLY__ */
 #else
@@ -158,18 +137,20 @@ do {						\
 
 #ifdef CONFIG_HUGETLB_PAGE
 
+#ifdef CONFIG_PPC_MM_SLICES
 #define HAVE_ARCH_HUGETLB_UNMAPPED_AREA
+#endif
 
 #endif /* !CONFIG_HUGETLB_PAGE */
 
 #define VM_DATA_DEFAULT_FLAGS \
-	(test_thread_flag(TIF_32BIT) ? \
+	(is_32bit_task() ? \
 	 VM_DATA_DEFAULT_FLAGS32 : VM_DATA_DEFAULT_FLAGS64)
 
 /*
  * This is the default if a program doesn't have a PT_GNU_STACK
  * program header entry. The PPC64 ELF ABI has a non executable stack
- * stack by default, so in the absense of a PT_GNU_STACK program header
+ * stack by default, so in the absence of a PT_GNU_STACK program header
  * we turn execute permission off.
  */
 #define VM_STACK_DEFAULT_FLAGS32	(VM_READ | VM_WRITE | VM_EXEC | \
@@ -179,7 +160,7 @@ do {						\
 					 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
 
 #define VM_STACK_DEFAULT_FLAGS \
-	(test_thread_flag(TIF_32BIT) ? \
+	(is_32bit_task() ? \
 	 VM_STACK_DEFAULT_FLAGS32 : VM_STACK_DEFAULT_FLAGS64)
 
 #include <asm-generic/getorder.h>

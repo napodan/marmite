@@ -113,6 +113,16 @@ typedef struct page *pgtable_t;
 #define __MEMORY_SIZE		CONFIG_MEMORY_SIZE
 
 /*
+ * PHYSICAL_OFFSET is the offset in physical memory where the base
+ * of the kernel is loaded.
+ */
+#ifdef CONFIG_PHYSICAL_START
+#define PHYSICAL_OFFSET (CONFIG_PHYSICAL_START - __MEMORY_START)
+#else
+#define PHYSICAL_OFFSET 0
+#endif
+
+/*
  * PAGE_OFFSET is the virtual address of the start of kernel address
  * space.
  */
@@ -141,8 +151,13 @@ typedef struct page *pgtable_t;
 #endif /* !__ASSEMBLY__ */
 
 #ifdef CONFIG_UNCACHED_MAPPING
+#if defined(CONFIG_29BIT)
+#define UNCAC_ADDR(addr)	P2SEGADDR(addr)
+#define CAC_ADDR(addr)		P1SEGADDR(addr)
+#else
 #define UNCAC_ADDR(addr)	((addr) - PAGE_OFFSET + uncached_start)
 #define CAC_ADDR(addr)		((addr) - uncached_start + PAGE_OFFSET)
+#endif
 #else
 #define UNCAC_ADDR(addr)	((addr))
 #define CAC_ADDR(addr)		((addr))
@@ -180,13 +195,13 @@ typedef struct page *pgtable_t;
  * Some drivers need to perform DMA into kmalloc'ed buffers
  * and so we have to increase the kmalloc minalign for this.
  */
-#define ARCH_KMALLOC_MINALIGN	L1_CACHE_BYTES
+#define ARCH_DMA_MINALIGN	L1_CACHE_BYTES
 
 #ifdef CONFIG_SUPERH64
 /*
  * While BYTES_PER_WORD == 4 on the current sh64 ABI, GCC will still
  * happily generate {ld/st}.q pairs, requiring us to have 8-byte
- * alignment to avoid traps. The kmalloc alignment is gauranteed by
+ * alignment to avoid traps. The kmalloc alignment is guaranteed by
  * virtue of L1_CACHE_BYTES, requiring this to only be special cased
  * for slab caches.
  */

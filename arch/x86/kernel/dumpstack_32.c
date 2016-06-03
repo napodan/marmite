@@ -16,8 +16,6 @@
 
 #include <asm/stacktrace.h>
 
-#include "dumpstack.h"
-
 
 void dump_trace(struct task_struct *task, struct pt_regs *regs,
 		unsigned long *stack, unsigned long bp,
@@ -36,17 +34,8 @@ void dump_trace(struct task_struct *task, struct pt_regs *regs,
 			stack = (unsigned long *)task->thread.sp;
 	}
 
-#ifdef CONFIG_FRAME_POINTER
-	if (!bp) {
-		if (task == current) {
-			/* Grab bp right from our regs */
-			get_bp(bp);
-		} else {
-			/* bp is the last reg pushed by switch_to */
-			bp = *(unsigned long *) task->thread.sp;
-		}
-	}
-#endif
+	if (!bp)
+		bp = stack_frame(task, regs);
 
 	for (;;) {
 		struct thread_info *context;
@@ -84,25 +73,22 @@ show_stack_log_lvl(struct task_struct *task, struct pt_regs *regs,
 		if (kstack_end(stack))
 			break;
 		if (i && ((i % STACKSLOTS_PER_LINE) == 0))
-			printk("\n%s", log_lvl);
-		printk(" %08lx", *stack++);
+			pr_cont("\n");
+		pr_cont(" %08lx", *stack++);
 		touch_nmi_watchdog();
 	}
-	printk("\n");
+	pr_cont("\n");
 	show_trace_log_lvl(task, regs, sp, bp, log_lvl);
 }
 
 
-void show_registers(struct pt_regs *regs)
+void show_regs(struct pt_regs *regs)
 {
 	int i;
 
-	print_modules();
-	__show_regs(regs, 0);
+	show_regs_print_info(KERN_EMERG);
+	__show_regs(regs, !user_mode_vm(regs));
 
-	printk(KERN_EMERG "Process %.*s (pid: %d, ti=%p task=%p task.ti=%p)\n",
-		TASK_COMM_LEN, current->comm, task_pid_nr(current),
-		current_thread_info(), current, task_thread_info(current));
 	/*
 	 * When in-kernel, we also print out the stack and code at the
 	 * time of the fault..
@@ -113,11 +99,10 @@ void show_registers(struct pt_regs *regs)
 		unsigned char c;
 		u8 *ip;
 
-		printk(KERN_EMERG "Stack:\n");
-		show_stack_log_lvl(NULL, regs, &regs->sp,
-				0, KERN_EMERG);
+		pr_emerg("Stack:\n");
+		show_stack_log_lvl(NULL, regs, &regs->sp, 0, KERN_EMERG);
 
-		printk(KERN_EMERG "Code: ");
+		pr_emerg("Code:");
 
 		ip = (u8 *)regs->ip - code_prologue;
 		if (ip < (u8 *)PAGE_OFFSET || probe_kernel_address(ip, c)) {
@@ -128,16 +113,16 @@ void show_registers(struct pt_regs *regs)
 		for (i = 0; i < code_len; i++, ip++) {
 			if (ip < (u8 *)PAGE_OFFSET ||
 					probe_kernel_address(ip, c)) {
-				printk(" Bad EIP value.");
+				pr_cont("  Bad EIP value.");
 				break;
 			}
 			if (ip == (u8 *)regs->ip)
-				printk("<%02x> ", c);
+				pr_cont(" <%02x>", c);
 			else
-				printk("%02x ", c);
+				pr_cont(" %02x", c);
 		}
 	}
-	printk("\n");
+	pr_cont("\n");
 }
 
 int is_valid_bugaddr(unsigned long ip)

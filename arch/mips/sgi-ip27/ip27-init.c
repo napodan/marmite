@@ -93,7 +93,7 @@ static void __cpuinit per_hub_init(cnodeid_t cnode)
 
 	/*
 	 * Some interrupts are reserved by hardware or by software convention.
-	 * Mark these as reserved right away so they won't be used accidently
+	 * Mark these as reserved right away so they won't be used accidentally
 	 * later.
 	 */
 	for (i = 0; i <= BASE_PCI_IRQ; i++) {
@@ -151,7 +151,7 @@ nasid_t
 get_nasid(void)
 {
 	return (nasid_t)((LOCAL_HUB_L(NI_STATUS_REV_ID) & NSRI_NODEID_MASK)
-	                 >> NSRI_NODEID_SHFT);
+			 >> NSRI_NODEID_SHFT);
 }
 
 /*

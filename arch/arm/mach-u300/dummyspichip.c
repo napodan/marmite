@@ -46,7 +46,6 @@ static ssize_t dummy_looptest(struct device *dev,
 	 * struct, this is just used here to alter the behaviour of the chip
 	 * in order to perform tests.
 	 */
-	struct pl022_config_chip *chip_info = spi->controller_data;
 	int status;
 	u8 txbuf[14] = {0xDE, 0xAD, 0xBE, 0xEF, 0x2B, 0xAD,
 			0xCA, 0xFE, 0xBA, 0xBE, 0xB1, 0x05,
@@ -72,7 +71,7 @@ static ssize_t dummy_looptest(struct device *dev,
 	 * Force chip to 8 bit mode
 	 * WARNING: NEVER DO THIS IN REAL DRIVER CODE, THIS SHOULD BE STATIC!
 	 */
-	chip_info->data_size = SSP_DATA_BITS_8;
+	spi->bits_per_word = 8;
 	/* You should NOT DO THIS EITHER */
 	spi->master->setup(spi);
 
@@ -159,7 +158,7 @@ static ssize_t dummy_looptest(struct device *dev,
 	 * Force chip to 16 bit mode
 	 * WARNING: NEVER DO THIS IN REAL DRIVER CODE, THIS SHOULD BE STATIC!
 	 */
-	chip_info->data_size = SSP_DATA_BITS_16;
+	spi->bits_per_word = 16;
 	/* You should NOT DO THIS EITHER */
 	spi->master->setup(spi);
 
@@ -223,7 +222,7 @@ static ssize_t dummy_looptest(struct device *dev,
 
 static DEVICE_ATTR(looptest, S_IRUGO, dummy_looptest, NULL);
 
-static int __devinit pl022_dummy_probe(struct spi_device *spi)
+static int pl022_dummy_probe(struct spi_device *spi)
 {
 	struct dummy *p_dummy;
 	int status;
@@ -252,7 +251,7 @@ out_dev_create_looptest_failed:
 	return status;
 }
 
-static int __devexit pl022_dummy_remove(struct spi_device *spi)
+static int pl022_dummy_remove(struct spi_device *spi)
 {
 	struct dummy *p_dummy = dev_get_drvdata(&spi->dev);
 
@@ -270,7 +269,7 @@ static struct spi_driver pl022_dummy_driver = {
 		.owner	= THIS_MODULE,
 	},
 	.probe	= pl022_dummy_probe,
-	.remove	= __devexit_p(pl022_dummy_remove),
+	.remove	= pl022_dummy_remove,
 };
 
 static int __init pl022_init_dummy(void)

@@ -18,6 +18,7 @@
 #endif
 
 #include <asm/ptrace.h>
+#include <asm/opcodes-virt.h>
 
 /*
  * Endian independent macros for shifting bytes within registers.

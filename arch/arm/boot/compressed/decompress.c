@@ -13,8 +13,6 @@ extern void error(char *);
 #define STATIC static
 #define STATIC_RW_DATA	/* non-static please */
 
-#define ARCH_HAS_DECOMP_WDOG
-
 /* Diagnostic functions */
 #ifdef DEBUG
 #  define Assert(cond,msg) {if(!(cond)) error(msg);}
@@ -32,6 +30,9 @@ extern void error(char *);
 #  define Tracecv(c,x)
 #endif
 
+/* Not needed, but used in some headers pulled in by decompressors */
+extern char * strstr(const char * s1, const char *s2);
+
 #ifdef CONFIG_KERNEL_GZIP
 #include "../../../../lib/decompress_inflate.c"
 #endif
@@ -44,7 +45,13 @@ extern void error(char *);
 #include "../../../../lib/decompress_unlzma.c"
 #endif
 
-void do_decompress(u8 *input, int len, u8 *output, void (*error)(char *x))
+#ifdef CONFIG_KERNEL_XZ
+#define memmove memmove
+#define memcpy memcpy
+#include "../../../../lib/decompress_unxz.c"
+#endif
+
+int do_decompress(u8 *input, int len, u8 *output, void (*error)(char *x))
 {
-	decompress(input, len, NULL, NULL, output, NULL, error);
+	return decompress(input, len, NULL, NULL, output, NULL, error);
 }

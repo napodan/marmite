@@ -82,7 +82,7 @@ ZTEXTADDR	:= $(CONFIG_ZBOOT_ROM_TEXT)
 ZBSSADDR	:= $(CONFIG_ZBOOT_ROM_BSS)
 else
 ZTEXTADDR	:= 0
-ZBSSADDR	:= ALIGN(4)
+ZBSSADDR	:= ALIGN(8)
 endif
 
 SEDFLAGS	= s/TEXT_START/$(ZTEXTADDR)/;s/BSS_START/$(ZBSSADDR)/
@@ -124,8 +124,8 @@ ORIG_CFLAGS := $(KBUILD_CFLAGS)
 KBUILD_CFLAGS = $(subst -pg, , $(ORIG_CFLAGS))
 endif
 
-EXTRA_CFLAGS  := -fpic -fno-builtin
-EXTRA_AFLAGS  := -Wa,-march=all
+ccflags-y := -fpic -mno-single-pic-base -fno-builtin -I$(obj)
+asflags-y := -DZIMAGE
 
 # Supply kernel BSS size to the decompressor via a linker symbol.
 KBSS_SZ = $(shell $(CROSS_COMPILE)size $(obj)/../../../../vmlinux | \
@@ -150,7 +150,7 @@ LDFLAGS_vmlinux += -T
 # For __aeabi_uidivmod
 lib1funcs = $(obj)/lib1funcs.o
 
-$(obj)/lib1funcs.S: $(srctree)/arch/$(SRCARCH)/lib/lib1funcs.S FORCE
+$(obj)/lib1funcs.S: $(srctree)/arch/$(SRCARCH)/lib/lib1funcs.S
 	$(call cmd,shipped)
 
 # For __aeabi_llsl
@@ -180,9 +180,10 @@ if [ $(words $(ZRELADDR)) -gt 1 -a "$(CONFIG_AUTO_ZRELADDR)" = "" ]; then \
 fi
 
 $(obj)/vmlinux: $(obj)/vmlinux.lds $(obj)/$(HEAD) $(obj)/piggy.$(suffix_y).o \
-		$(addprefix $(obj)/, $(OBJS)) $(lib1funcs) FORCE
+		$(addprefix $(obj)/, $(OBJS)) $(lib1funcs) $(ashldi3) FORCE
+	@$(check_for_multiple_zreladdr)
 	$(call if_changed,ld)
-	@:
+	@$(check_for_bad_syms)
 
 $(obj)/piggy.$(suffix_y): $(obj)/../Image FORCE
 	$(call if_changed,$(suffix_y))

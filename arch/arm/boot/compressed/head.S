@@ -21,18 +21,10 @@
 
 #if defined(CONFIG_DEBUG_ICEDCC)
 
-#if defined(CONFIG_CPU_V6) || defined(CONFIG_CPU_V7)
+#if defined(CONFIG_CPU_V6) || defined(CONFIG_CPU_V6K) || defined(CONFIG_CPU_V7)
 		.macro	loadsp, rb, tmp
 		.endm
 		.macro	writeb, ch, rb
-		mcr	p14, 0, \ch, c0, c5, 0
-		.endm
-#elif defined(CONFIG_CPU_V7)
-		.macro	loadsp, rb, tmp
-		.endm
-		.macro	writeb, ch, rb
-wait:		mrc	p14, 0, pc, c0, c1, 0
-		bcs	wait
 		mcr	p14, 0, \ch, c0, c5, 0
 		.endm
 #elif defined(CONFIG_CPU_XSCALE)
@@ -51,7 +43,7 @@ wait:		mrc	p14, 0, pc, c0, c1, 0
 
 #else
 
-#include <mach/debug-macro.S>
+#include CONFIG_DEBUG_LL_INCLUDE
 
 		.macro	writeb,	ch, rb
 		senduart \ch, \rb
@@ -66,7 +58,7 @@ wait:		mrc	p14, 0, pc, c0, c1, 0
 		add	\rb, \rb, #0x00010000	@ Ser1
 #endif
 		.endm
-#elif defined(CONFIG_ARCH_S3C2410)
+#elif defined(CONFIG_ARCH_S3C24XX)
 		.macro loadsp, rb, tmp
 		mov	\rb, #0x50000000
 		add	\rb, \rb, #0x4000 * CONFIG_S3C_LOWLEVEL_UART_PORT

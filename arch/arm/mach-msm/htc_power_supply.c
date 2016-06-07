@@ -30,7 +30,7 @@
 #include <linux/switch.h>
 #include <linux/wakelock.h>
 
-#include "board-mahimahi.h"
+#include "board-bravo.h"
 
 extern void notify_usb_connected(int);
 
@@ -62,7 +62,7 @@ static struct dock_state ds = {
 	.lock = __MUTEX_INITIALIZER(ds.lock),
 };
 
-#define _GPIO_DOCK MAHIMAHI_GPIO_DOCK
+#define _GPIO_DOCK BRAVO_GPIO_DOCK
 
 #define dock_out(n) gpio_direction_output(_GPIO_DOCK, n)
 #define dock_out2(n) gpio_set_value(_GPIO_DOCK, n)

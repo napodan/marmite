@@ -135,3 +135,4 @@ static inline int tick_device_is_functional(struct clock_event_device *dev)
 {
 	return !(dev->features & CLOCK_EVT_FEAT_DUMMY);
 }
+extern void do_timer(unsigned long ticks);

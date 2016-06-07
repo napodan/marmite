@@ -1259,7 +1259,7 @@ static void __init bravo_map_io(void)
 	msm_clock_init(msm_clocks_8x50, msm_num_clocks_8x50);
 }
 
-extern struct sys_timer msm_timer;
+extern void __init msm_timer_init(void);
 
 #ifdef CONFIG_MACH_BRAVO
 MACHINE_START(BRAVO, "bravo")
@@ -1271,5 +1271,5 @@ MACHINE_START(BRAVOC, "bravoc")
 	.map_io		= bravo_map_io,
 	.init_irq	= msm_init_irq,
 	.init_machine	= bravo_init,
-	.timer		= &msm_timer,
+	.init_time	= msm_timer_init,
 MACHINE_END

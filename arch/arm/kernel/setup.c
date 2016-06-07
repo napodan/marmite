@@ -119,6 +119,7 @@ EXPORT_SYMBOL(elf_platform);
 static const char *cpu_name;
 static const char *machine_name;
 static char __initdata cmd_line[COMMAND_LINE_SIZE];
+const struct machine_desc *machine_desc __initdata;
 
 static char default_command_line[COMMAND_LINE_SIZE] __initdata = CONFIG_CMDLINE;
 static union { char c[4]; unsigned long l; } endian_test __initdata = { { 'l', '?', '?', 'b' } };
@@ -672,6 +673,7 @@ void __init setup_arch(char **cmdline_p)
 
 	setup_processor();
 	mdesc = setup_machine(machine_arch_type);
+	machine_desc = mdesc;
 	machine_name = mdesc->name;
 
 	if (mdesc->soft_reboot)
@@ -728,7 +730,6 @@ void __init setup_arch(char **cmdline_p)
 	 * Set up various architecture-specific pointers
 	 */
 	init_arch_irq = mdesc->init_irq;
-	system_timer = mdesc->timer;
 	init_machine = mdesc->init_machine;
 
 #ifdef CONFIG_VT

@@ -668,7 +668,7 @@ u32 msm_read_fast_timer(void)
 					clock->clocksource.shift);
 }
 
-static void __init msm_timer_init(void)
+void __init msm_timer_init(void)
 {
 	int i;
 	int res;
@@ -706,6 +706,3 @@ static void __init msm_timer_init(void)
 	}
 }
 
-struct sys_timer msm_timer = {
-	.init = msm_timer_init
-};

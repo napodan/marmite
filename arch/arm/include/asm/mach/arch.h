@@ -39,9 +39,14 @@ struct machine_desc {
 					 struct meminfo *);
 	void			(*map_io)(void);/* IO mapping function	*/
 	void			(*init_irq)(void);
-	struct sys_timer	*timer;		/* system tick timer	*/
+	void			(*init_time)(void);
 	void			(*init_machine)(void);
 };
+
+/*
+ * Current machine - only accessible during boot.
+ */
+extern const struct machine_desc *machine_desc;
 
 /*
  * Set of macros to define architecture features.  This is built into

@@ -29,6 +29,11 @@ static const char __module_cat(name,__LINE__)[]				  \
 #define __MODULE_PARM_TYPE(name, _type)					  \
   __MODULE_INFO(parmtype, name##type, #name ":" _type)
 
+/* One for each parameter, describing how to use it.  Some files do
+   multiple of these per line, so can't just use MODULE_INFO. */
+#define MODULE_PARM_DESC(_parm, desc) \
+	__MODULE_INFO(parm, _parm, #_parm ":" desc)
+
 struct kernel_param;
 
 /* Returns 0, or -errno.  arg is in kp->arg. */

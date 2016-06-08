@@ -224,5 +224,6 @@ extern struct meminfo meminfo;
 #define bank_phys_size(bank)	(bank)->size
 
 #endif  /*  __KERNEL__  */
+extern void early_print(const char *str, ...);
 
 #endif

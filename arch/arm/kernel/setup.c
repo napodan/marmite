@@ -267,6 +267,22 @@ static void __init cacheid_init(void)
  * already provide the required functionality.
  */
 extern struct proc_info_list *lookup_processor_type(unsigned int);
+
+void __init early_print(const char *str, ...)
+{
+	extern void printascii(const char *);
+	char buf[256];
+	va_list ap;
+
+	va_start(ap, str);
+	vsnprintf(buf, sizeof(buf), str, ap);
+	va_end(ap);
+
+#ifdef CONFIG_DEBUG_LL
+	printascii(buf);
+#endif
+	printk("%s", buf);
+}
 extern struct machine_desc *lookup_machine_type(unsigned int);
 
 static void __init setup_processor(void)

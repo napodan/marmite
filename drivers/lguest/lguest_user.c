@@ -1,8 +1,10 @@
-/*P:200 This contains all the /dev/lguest code, whereby the userspace launcher
- * controls and communicates with the Guest.  For example, the first write will
- * tell us the Guest's memory layout and entry point.  A read will run the
- * Guest until something happens, such as a signal or the Guest doing a NOTIFY
- * out to the Launcher.
+/*P:200 This contains all the /dev/lguest code, whereby the userspace
+ * launcher controls and communicates with the Guest.  For example,
+ * the first write will tell us the Guest's memory layout and entry
+ * point.  A read will run the Guest until something happens, such as
+ * a signal or the Guest doing a NOTIFY out to the Launcher.  There is
+ * also a way for the Launcher to attach eventfds to particular NOTIFY
+ * values instead of returning from the read() call.
 :*/
 #include <linux/uaccess.h>
 #include <linux/miscdevice.h>
@@ -11,6 +13,7 @@
 #include <linux/eventfd.h>
 #include <linux/file.h>
 #include <linux/slab.h>
+#include <linux/export.h>
 #include "lg.h"
 
 /*L:056
@@ -130,7 +133,7 @@ static int add_eventfd(struct lguest *lg, unsigned long addr, int fd)
 	rcu_assign_pointer(lg->eventfds, new);
 
 	/*
-	 * We're not in a big hurry.  Wait until noone's looking at old
+	 * We're not in a big hurry.  Wait until no one's looking at old
 	 * version, then free it.
 	 */
 	synchronize_rcu();
@@ -247,13 +250,13 @@ static ssize_t read(struct file *file, char __user *user, size_t size,loff_t*o)
  */
 static int lg_cpu_start(struct lg_cpu *cpu, unsigned id, unsigned long start_ip)
 {
-	/* We have a limited number the number of CPUs in the lguest struct. */
+	/* We have a limited number of CPUs in the lguest struct. */
 	if (id >= ARRAY_SIZE(cpu->lg->cpus))
 		return -EINVAL;
 
 	/* Set up this CPU's id, and pointer back to the lguest struct. */
 	cpu->id = id;
-	cpu->lg = container_of((cpu - id), struct lguest, cpus[0]);
+	cpu->lg = container_of(cpu, struct lguest, cpus[id]);
 	cpu->lg->nr_cpus++;
 
 	/* Each CPU has a timer it can set. */
@@ -267,7 +270,7 @@ static int lg_cpu_start(struct lg_cpu *cpu, unsigned id, unsigned long start_ip)
 	if (!cpu->regs_page)
 		return -ENOMEM;
 
-	/* We actually put the registers at the bottom of the page. */
+	/* We actually put the registers at the end of the page. */
 	cpu->regs = (void *)cpu->regs_page + PAGE_SIZE - sizeof(*cpu->regs);
 
 	/*
@@ -357,8 +360,8 @@ static int initialize(struct file *file, const unsigned long __user *input)
 		goto free_eventfds;
 
 	/*
-	 * Initialize the Guest's shadow page tables, using the toplevel
-	 * address the Launcher gave us.  This allocates memory, so can fail.
+	 * Initialize the Guest's shadow page tables.  This allocates
+	 * memory, so can fail.
 	 */
 	err = init_guest_pagetable(lg);
 	if (err)
@@ -514,7 +517,9 @@ static const struct file_operations lguest_fops = {
 	.release = close,
 	.write	 = write,
 	.read	 = read,
+	.llseek  = default_llseek,
 };
+/*:*/
 
 /*
  * This is a textbook example of a "misc" character device.  Populate a "struct

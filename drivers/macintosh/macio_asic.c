@@ -137,7 +137,7 @@ extern struct device_attribute macio_dev_attrs[];
 struct bus_type macio_bus_type = {
        .name	= "macio",
        .match	= macio_bus_match,
-       .uevent = of_device_uevent,
+       .uevent = of_device_uevent_modalias,
        .probe	= macio_device_probe,
        .remove	= macio_device_remove,
        .shutdown = macio_device_shutdown,
@@ -387,11 +387,10 @@ static struct macio_dev * macio_add_one_device(struct macio_chip *chip,
 	/* Set the DMA ops to the ones from the PCI device, this could be
 	 * fishy if we didn't know that on PowerMac it's always direct ops
 	 * or iommu ops that will work fine
+	 *
+	 * To get all the fields, copy all archdata
 	 */
-	dev->ofdev.dev.archdata.dma_ops =
-		chip->lbus.pdev->dev.archdata.dma_ops;
-	dev->ofdev.dev.archdata.dma_data =
-		chip->lbus.pdev->dev.archdata.dma_data;
+	dev->ofdev.dev.archdata = chip->lbus.pdev->dev.archdata;
 #endif /* CONFIG_PCI */
 
 #ifdef DEBUG
@@ -680,7 +679,7 @@ void macio_release_resources(struct macio_dev *dev)
 
 #ifdef CONFIG_PCI
 
-static int __devinit macio_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
+static int macio_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
 	struct device_node* np;
 	struct macio_chip* chip;
@@ -740,7 +739,7 @@ static int __devinit macio_pci_probe(struct pci_dev *pdev, const struct pci_devi
 	return 0;
 }
 
-static void __devexit macio_pci_remove(struct pci_dev* pdev)
+static void macio_pci_remove(struct pci_dev* pdev)
 {
 	panic("removing of macio-asic not supported !\n");
 }
@@ -749,7 +748,7 @@ static void __devexit macio_pci_remove(struct pci_dev* pdev)
  * MacIO is matched against any Apple ID, it's probe() function
  * will then decide wether it applies or not
  */
-static const struct pci_device_id __devinitdata pci_ids [] = { {
+static const struct pci_device_id pci_ids[] = { {
 	.vendor		= PCI_VENDOR_ID_APPLE,
 	.device		= PCI_ANY_ID,
 	.subvendor	= PCI_ANY_ID,

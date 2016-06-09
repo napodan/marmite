@@ -17,6 +17,8 @@ source "drivers/gpu/vga/Kconfig"
 
 source "drivers/gpu/drm/Kconfig"
 
+source "drivers/gpu/msm/Kconfig"
+
 config VGASTATE
        tristate
        default n
@@ -49,7 +51,7 @@ menuconfig FB
 	  You need an utility program called fbset to make full use of frame
 	  buffer devices. Please read <file:Documentation/fb/framebuffer.txt>
 	  and the Framebuffer-HOWTO at
-	  <http://www.munted.org.uk/programming/Framebuffer-HOWTO-1.2.html> for more
+	  <http://www.munted.org.uk/programming/Framebuffer-HOWTO-1.3.html> for more
 	  information.
 
 	  Say Y here and to the driver for your graphics board below if you
@@ -206,13 +208,6 @@ config FB_MACMODES
        depends on FB
        default n
 
-config FB_BACKLIGHT
-	bool
-	depends on FB
-	select BACKLIGHT_LCD_SUPPORT
-	select BACKLIGHT_CLASS_DEVICE
-	default n
-
 config FB_MODE_HELPERS
         bool "Enable Video Mode Handling Helpers"
         depends on FB
@@ -304,69 +299,6 @@ config FB_ARMCLCD
 	  inserted into and removed from the running kernel), say M
 	  here and read <file:Documentation/kbuild/modules.txt>.  The module
 	  will be called amba-clcd.
-
-choice
-
-	depends on FB_ARMCLCD && (ARCH_LH7A40X || ARCH_LH7952X)
-	prompt "LCD Panel"
-	default FB_ARMCLCD_SHARP_LQ035Q7DB02
-
-config FB_ARMCLCD_SHARP_LQ035Q7DB02_HRTFT
-	bool "LogicPD LCD 3.5\" QVGA w/HRTFT IC"
-	help
-	  This is an implementation of the Sharp LQ035Q7DB02, a 3.5"
-	  color QVGA, HRTFT panel.  The LogicPD device includes
-	  an integrated HRTFT controller IC.
-	  The native resolution is 240x320.
-
-config FB_ARMCLCD_SHARP_LQ057Q3DC02
-	bool "LogicPD LCD 5.7\" QVGA"
-	help
-	  This is an implementation of the Sharp LQ057Q3DC02, a 5.7"
-	  color QVGA, TFT panel.  The LogicPD device includes an
-	  The native resolution is 320x240.
-
-config FB_ARMCLCD_SHARP_LQ64D343
-	bool "LogicPD LCD 6.4\" VGA"
-	help
-	  This is an implementation of the Sharp LQ64D343, a 6.4"
-	  color VGA, TFT panel.  The LogicPD device includes an
-	  The native resolution is 640x480.
-
-config FB_ARMCLCD_SHARP_LQ10D368
-	bool "LogicPD LCD 10.4\" VGA"
-	help
-	  This is an implementation of the Sharp LQ10D368, a 10.4"
-	  color VGA, TFT panel.  The LogicPD device includes an
-	  The native resolution is 640x480.
-
-
-config FB_ARMCLCD_SHARP_LQ121S1DG41
-	bool "LogicPD LCD 12.1\" SVGA"
-	help
-	  This is an implementation of the Sharp LQ121S1DG41, a 12.1"
-	  color SVGA, TFT panel.  The LogicPD device includes an
-	  The native resolution is 800x600.
-
-	  This panel requires a clock rate may be an integer fraction
-	  of the base LCDCLK frequency.  The driver will select the
-	  highest frequency available that is lower than the maximum
-	  allowed.  The panel may flicker if the clock rate is
-	  slower than the recommended minimum.
-
-config FB_ARMCLCD_AUO_A070VW01_WIDE
-	bool "AU Optronics A070VW01 LCD 7.0\" WIDE"
-	help
-	  This is an implementation of the AU Optronics, a 7.0"
-	  WIDE Color.  The native resolution is 234x480.
-
-config FB_ARMCLCD_HITACHI
-	bool "Hitachi Wide Screen 800x480"
-	help
-	  This is an implementation of the Hitachi 800x480.
-
-endchoice
-
 
 config FB_ACORN
 	bool "Acorn VIDC support"
@@ -748,24 +680,14 @@ config FB_N411
 config FB_HGA
 	tristate "Hercules mono graphics support"
 	depends on FB && X86
-	select FB_CFB_FILLRECT
-	select FB_CFB_COPYAREA
-	select FB_CFB_IMAGEBLIT
 	help
 	  Say Y here if you have a Hercules mono graphics card.
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called hgafb.
 
-	  As this card technology is 15 years old, most people will answer N
-	  here.
-
-config FB_HGA_ACCEL
-	bool "Hercules mono Acceleration functions (EXPERIMENTAL)"
-	depends on FB_HGA && EXPERIMENTAL
-	---help---
-	This will compile the Hercules mono graphics with
-	acceleration functions.
+	  As this card technology is at least 25 years old,
+	  most people will answer N here.
 
 config FB_SGIVW
 	tristate "SGI Visual Workstation framebuffer support"
@@ -945,18 +867,6 @@ config FB_PVR2
 	  (<file:drivers/video/pvr2fb.c>). Please see the file
 	  <file:Documentation/fb/pvr2fb.txt>.
 
-config FB_EPSON1355
-	bool "Epson 1355 framebuffer support"
-	depends on (FB = y) && ARCH_CEIVA
-	select FB_CFB_FILLRECT
-	select FB_CFB_COPYAREA
-	select FB_CFB_IMAGEBLIT
-	help
-	  Build in support for the SED1355 Epson Research Embedded RAMDAC
-	  LCD/CRT Controller (since redesignated as the S1D13505) as a
-	  framebuffer.  Product specs at
-	  <http://www.erd.epson.com/vdc/html/products.htm>.
-
 config FB_S1D13XXX
 	tristate "Epson S1D13XXX framebuffer support"
 	depends on FB
@@ -966,7 +876,7 @@ config FB_S1D13XXX
 	help
 	  Support for S1D13XXX framebuffer device family (currently only
 	  working with S1D13806). Product specs at
-	  <http://www.erd.epson.com/vdc/html/legacy_13xxx.htm>
+	  <http://vdc.epson.com/>
 
 config FB_ATMEL
 	tristate "AT91/AT32 LCD Controller support"
@@ -997,7 +907,6 @@ config FB_ATMEL_STN
 config FB_NVIDIA
 	tristate "nVidia Framebuffer Support"
 	depends on FB && PCI
-	select FB_BACKLIGHT if FB_NVIDIA_BACKLIGHT
 	select FB_MODE_HELPERS
 	select FB_CFB_FILLRECT
 	select FB_CFB_COPYAREA
@@ -1045,7 +954,6 @@ config FB_NVIDIA_BACKLIGHT
 config FB_RIVA
 	tristate "nVidia Riva support"
 	depends on FB && PCI
-	select FB_BACKLIGHT if FB_RIVA_BACKLIGHT
 	select FB_MODE_HELPERS
 	select FB_CFB_FILLRECT
 	select FB_CFB_COPYAREA
@@ -1207,7 +1115,7 @@ config FB_MATROX
 	  module will be called matroxfb.
 
 	  You can pass several parameters to the driver at boot time or at
-	  module load time. The parameters look like "video=matrox:XXX", and
+	  module load time. The parameters look like "video=matroxfb:XXX", and
 	  are described in <file:Documentation/fb/matroxfb.txt>.
 
 config FB_MATROX_MILLENIUM
@@ -1311,7 +1219,6 @@ config FB_MATROX_MAVEN
 config FB_RADEON
 	tristate "ATI Radeon display support"
 	depends on FB && PCI
-	select FB_BACKLIGHT if FB_RADEON_BACKLIGHT
 	select FB_MODE_HELPERS
 	select FB_CFB_FILLRECT
 	select FB_CFB_COPYAREA
@@ -1323,7 +1230,7 @@ config FB_RADEON
 	  don't need to choose this to run the Radeon in plain VGA mode.
 
 	  There is a product page at
-	  http://apps.ati.com/ATIcompare/
+	  http://products.amd.com/en-us/GraphicCardResult.aspx
 
 config FB_RADEON_I2C
 	bool "DDC/I2C for ATI Radeon support"
@@ -1355,7 +1262,6 @@ config FB_ATY128
 	select FB_CFB_FILLRECT
 	select FB_CFB_COPYAREA
 	select FB_CFB_IMAGEBLIT
-	select FB_BACKLIGHT if FB_ATY128_BACKLIGHT
 	select FB_MACMODES if PPC_PMAC
 	help
 	  This driver supports graphics boards with the ATI Rage128 chips.
@@ -1378,7 +1284,6 @@ config FB_ATY
 	select FB_CFB_FILLRECT
 	select FB_CFB_COPYAREA
 	select FB_CFB_IMAGEBLIT
-	select FB_BACKLIGHT if FB_ATY_BACKLIGHT
 	select FB_MACMODES if PPC
 	help
 	  This driver supports graphics boards with the ATI Mach64 chips.
@@ -1395,10 +1300,10 @@ config FB_ATY_CT
 	  Say Y here to support use of ATI's 64-bit Rage boards (or other
 	  boards based on the Mach64 CT, VT, GT, and LT chipsets) as a
 	  framebuffer device.  The ATI product support page for these boards
-	  is at <http://support.ati.com/products/pc/mach64/>.
+	  is at <http://support.ati.com/products/pc/mach64/mach64.html>.
 
 config FB_ATY_GENERIC_LCD
-	bool "Mach64 generic LCD support (EXPERIMENTAL)"
+	bool "Mach64 generic LCD support"
 	depends on FB_ATY_CT
 	help
 	  Say Y if you have a laptop with an ATI Rage LT PRO, Rage Mobility,
@@ -2014,30 +1919,18 @@ config FB_SM501
 	  If unsure, say N.
 
 
-config FB_PNX4008_DUM
-	tristate "Display Update Module support on Philips PNX4008 board"
-	depends on FB && ARCH_PNX4008
-	---help---
-	  Say Y here to enable support for PNX4008 Display Update Module (DUM)
-
-config FB_PNX4008_DUM_RGB
-	tristate "RGB Framebuffer support on Philips PNX4008 board"
-	depends on FB_PNX4008_DUM
-	select FB_CFB_FILLRECT
-	select FB_CFB_COPYAREA
-	select FB_CFB_IMAGEBLIT
-	---help---
-	  Say Y here to enable support for PNX4008 RGB Framebuffer
 
 config FB_IBM_GXT4500
-	tristate "Framebuffer support for IBM GXT4500P adaptor"
+	tristate "Framebuffer support for IBM GXT4000P/4500P/6000P/6500P adaptors"
 	depends on FB && PPC
 	select FB_CFB_FILLRECT
 	select FB_CFB_COPYAREA
 	select FB_CFB_IMAGEBLIT
 	---help---
-	  Say Y here to enable support for the IBM GXT4500P display
-	  adaptor, found on some IBM System P (pSeries) machines.
+	  Say Y here to enable support for the IBM GXT4000P/6000P and
+	  GXT4500P/6500P display adaptor based on Raster Engine RC1000,
+	  found on some IBM System P (pSeries) machines. This driver
+	  doesn't use Geometry Engine GT1000.
 
 config FB_PS3
 	tristate "PS3 GPU framebuffer driver"
@@ -2170,7 +2063,6 @@ config FB_MB862XX_PCI_GDC
 
 config FB_MB862XX_LIME
 	bool "Lime GDC"
-	depends on FB_MB862XX
 	depends on OF && !FB_MB862XX_PCI_GDC
 	depends on PPC
 	select FB_FOREIGN_ENDIAN
@@ -2222,8 +2114,8 @@ config FB_BROADSHEET
 	  and could also have been called by other names when coupled with
 	  a bridge adapter.
 
-source "drivers/video/msm/Kconfig"
 
+source "drivers/video/msm/Kconfig"
 source "drivers/video/omap/Kconfig"
 source "drivers/video/omap2/Kconfig"
 

@@ -172,7 +172,7 @@ struct ch7006_mode ch7006_modes[] = {
 };
 
 struct ch7006_mode *ch7006_lookup_mode(struct drm_encoder *encoder,
-				       struct drm_display_mode *drm_mode)
+				       const struct drm_display_mode *drm_mode)
 {
 	struct ch7006_priv *priv = to_ch7006_priv(encoder);
 	struct ch7006_mode *mode;
@@ -316,7 +316,10 @@ void ch7006_setup_power_state(struct drm_encoder *encoder)
 		}
 
 	} else {
-		*power |= bitfs(CH7006_POWER_LEVEL, FULL_POWER_OFF);
+		if (priv->chip_version >= 0x20)
+			*power |= bitfs(CH7006_POWER_LEVEL, FULL_POWER_OFF);
+		else
+			*power |= bitfs(CH7006_POWER_LEVEL, POWER_OFF);
 	}
 }
 

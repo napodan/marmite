@@ -34,7 +34,7 @@
  */
 
 #include <linux/seq_file.h>
-#include "drmP.h"
+#include <drm/drmP.h>
 
 /**
  * Called when "/proc/dri/.../name" is read.
@@ -47,19 +47,19 @@ int drm_name_info(struct seq_file *m, void *data)
 	struct drm_minor *minor = node->minor;
 	struct drm_device *dev = minor->dev;
 	struct drm_master *master = minor->master;
-
+	const char *bus_name;
 	if (!master)
 		return 0;
 
+	bus_name = dev->driver->bus->get_name(dev);
 	if (master->unique) {
 		seq_printf(m, "%s %s %s\n",
-			   dev->driver->pci_driver.name,
-			   pci_name(dev->pdev), master->unique);
+			   bus_name,
+			   dev_name(dev->dev), master->unique);
 	} else {
-		seq_printf(m, "%s %s\n", dev->driver->pci_driver.name,
-			   pci_name(dev->pdev));
+		seq_printf(m, "%s %s\n",
+			   bus_name, dev_name(dev->dev));
 	}
-
 	return 0;
 }
 
@@ -104,42 +104,6 @@ int drm_vm_info(struct seq_file *m, void *data)
 		else
 			seq_printf(m, "%4d\n", map->mtrr);
 		i++;
-	}
-	mutex_unlock(&dev->struct_mutex);
-	return 0;
-}
-
-/**
- * Called when "/proc/dri/.../queues" is read.
- */
-int drm_queues_info(struct seq_file *m, void *data)
-{
-	struct drm_info_node *node = (struct drm_info_node *) m->private;
-	struct drm_device *dev = node->minor->dev;
-	int i;
-	struct drm_queue *q;
-
-	mutex_lock(&dev->struct_mutex);
-	seq_printf(m, "  ctx/flags   use   fin"
-		   "   blk/rw/rwf  wait    flushed	   queued"
-		   "      locks\n\n");
-	for (i = 0; i < dev->queue_count; i++) {
-		q = dev->queuelist[i];
-		atomic_inc(&q->use_count);
-		seq_printf(m,   "%5d/0x%03x %5d %5d"
-			   " %5d/%c%c/%c%c%c %5Zd\n",
-			   i,
-			   q->flags,
-			   atomic_read(&q->use_count),
-			   atomic_read(&q->finalization),
-			   atomic_read(&q->block_count),
-			   atomic_read(&q->block_read) ? 'r' : '-',
-			   atomic_read(&q->block_write) ? 'w' : '-',
-			   waitqueue_active(&q->read_queue) ? 'r' : '-',
-			   waitqueue_active(&q->write_queue) ? 'w' : '-',
-			   waitqueue_active(&q->flush_queue) ? 'f' : '-',
-			   DRM_BUFCOUNT(&q->waitlist));
-		atomic_dec(&q->use_count);
 	}
 	mutex_unlock(&dev->struct_mutex);
 	return 0;
@@ -227,24 +191,23 @@ int drm_clients_info(struct seq_file *m, void *data)
 		seq_printf(m, "%c %3d %5d %5d %10u %10lu\n",
 			   priv->authenticated ? 'y' : 'n',
 			   priv->minor->index,
-			   priv->pid,
-			   priv->uid, priv->magic, priv->ioctl_count);
+			   pid_vnr(priv->pid),
+			   from_kuid_munged(seq_user_ns(m), priv->uid),
+			   priv->magic, priv->ioctl_count);
 	}
 	mutex_unlock(&dev->struct_mutex);
 	return 0;
 }
 
 
-int drm_gem_one_name_info(int id, void *ptr, void *data)
+static int drm_gem_one_name_info(int id, void *ptr, void *data)
 {
 	struct drm_gem_object *obj = ptr;
 	struct seq_file *m = data;
 
-	seq_printf(m, "name %d size %zd\n", obj->name, obj->size);
-
 	seq_printf(m, "%6d %8zd %7d %8d\n",
 		   obj->name, obj->size,
-		   atomic_read(&obj->handlecount.refcount),
+		   atomic_read(&obj->handle_count),
 		   atomic_read(&obj->refcount.refcount));
 	return 0;
 }
@@ -256,20 +219,6 @@ int drm_gem_name_info(struct seq_file *m, void *data)
 
 	seq_printf(m, "  name     size handles refcount\n");
 	idr_for_each(&dev->object_name_idr, drm_gem_one_name_info, m);
-	return 0;
-}
-
-int drm_gem_object_info(struct seq_file *m, void* data)
-{
-	struct drm_info_node *node = (struct drm_info_node *) m->private;
-	struct drm_device *dev = node->minor->dev;
-
-	seq_printf(m, "%d objects\n", atomic_read(&dev->object_count));
-	seq_printf(m, "%d object bytes\n", atomic_read(&dev->object_memory));
-	seq_printf(m, "%d pinned\n", atomic_read(&dev->pin_count));
-	seq_printf(m, "%d pin bytes\n", atomic_read(&dev->pin_memory));
-	seq_printf(m, "%d gtt bytes\n", atomic_read(&dev->gtt_memory));
-	seq_printf(m, "%d gtt total\n", dev->gtt_total);
 	return 0;
 }
 
@@ -286,17 +235,18 @@ int drm_vma_info(struct seq_file *m, void *data)
 #endif
 
 	mutex_lock(&dev->struct_mutex);
-	seq_printf(m, "vma use count: %d, high_memory = %p, 0x%08llx\n",
+	seq_printf(m, "vma use count: %d, high_memory = %pK, 0x%pK\n",
 		   atomic_read(&dev->vma_count),
-		   high_memory, (u64)virt_to_phys(high_memory));
+		   high_memory, (void *)(unsigned long)virt_to_phys(high_memory));
 
 	list_for_each_entry(pt, &dev->vmalist, head) {
 		vma = pt->vma;
 		if (!vma)
 			continue;
 		seq_printf(m,
-			   "\n%5d 0x%08lx-0x%08lx %c%c%c%c%c%c 0x%08lx000",
-			   pt->pid, vma->vm_start, vma->vm_end,
+			   "\n%5d 0x%pK-0x%pK %c%c%c%c%c%c 0x%08lx000",
+			   pt->pid,
+			   (void *)vma->vm_start, (void *)vma->vm_end,
 			   vma->vm_flags & VM_READ ? 'r' : '-',
 			   vma->vm_flags & VM_WRITE ? 'w' : '-',
 			   vma->vm_flags & VM_EXEC ? 'x' : '-',

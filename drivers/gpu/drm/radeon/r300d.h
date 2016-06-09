@@ -48,10 +48,13 @@
 #define		PACKET3_3D_DRAW_IMMD		0x29
 #define		PACKET3_3D_DRAW_INDX		0x2A
 #define		PACKET3_3D_LOAD_VBPNTR		0x2F
+#define		PACKET3_3D_CLEAR_ZMASK		0x32
 #define		PACKET3_INDX_BUFFER		0x33
 #define		PACKET3_3D_DRAW_VBUF_2		0x34
 #define		PACKET3_3D_DRAW_IMMD_2		0x35
 #define		PACKET3_3D_DRAW_INDX_2		0x36
+#define		PACKET3_3D_CLEAR_HIZ		0x37
+#define		PACKET3_3D_CLEAR_CMASK		0x38
 #define		PACKET3_BITBLT_MULTI		0x9B
 
 #define PACKET0(reg, n)	(CP_PACKET0 |					\
@@ -61,17 +64,6 @@
 #define PACKET3(op, n)	(CP_PACKET3 |					\
 			 REG_SET(PACKET3_IT_OPCODE, (op)) |		\
 			 REG_SET(PACKET3_COUNT, (n)))
-
-#define	PACKET_TYPE0	0
-#define	PACKET_TYPE1	1
-#define	PACKET_TYPE2	2
-#define	PACKET_TYPE3	3
-
-#define CP_PACKET_GET_TYPE(h) (((h) >> 30) & 3)
-#define CP_PACKET_GET_COUNT(h) (((h) >> 16) & 0x3FFF)
-#define CP_PACKET0_GET_REG(h) (((h) & 0x1FFF) << 2)
-#define CP_PACKET0_GET_ONE_REG_WR(h) (((h) >> 15) & 1)
-#define CP_PACKET3_GET_OPCODE(h) (((h) >> 8) & 0xFF)
 
 /* Registers */
 #define R_000148_MC_FB_LOCATION                      0x000148

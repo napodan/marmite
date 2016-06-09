@@ -151,6 +151,10 @@ config VETH
 	  When one end receives the packet it appears on its pair and vice
 	  versa.
 
+source "drivers/net/arcnet/Kconfig"
+
+source "drivers/atm/Kconfig"
+
 config NET_SB1000
 	tristate "General Instruments Surfboard 1000"
 	depends on PNP
@@ -174,8 +178,6 @@ config NET_SB1000
 	  <http://linuxpower.cx/~cable/>
 
 	  If you don't have this card, of course say N.
-
-source "drivers/net/arcnet/Kconfig"
 
 source "drivers/net/phy/Kconfig"
 
@@ -2851,10 +2853,6 @@ source "drivers/net/usb/Kconfig"
 source "drivers/net/pcmcia/Kconfig"
 
 source "drivers/net/wan/Kconfig"
-
-source "drivers/atm/Kconfig"
-
-source "drivers/ieee802154/Kconfig"
 
 source "drivers/s390/net/Kconfig"
 

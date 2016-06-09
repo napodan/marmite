@@ -351,9 +351,16 @@
 #define AVIVO_D1CRTC_BLANK_CONTROL                              0x6084
 #define AVIVO_D1CRTC_INTERLACE_CONTROL                          0x6088
 #define AVIVO_D1CRTC_INTERLACE_STATUS                           0x608c
+#define AVIVO_D1CRTC_STATUS                                     0x609c
+#       define AVIVO_D1CRTC_V_BLANK                             (1 << 0)
 #define AVIVO_D1CRTC_STATUS_POSITION                            0x60a0
 #define AVIVO_D1CRTC_FRAME_COUNT                                0x60a4
+#define AVIVO_D1CRTC_STATUS_HV_COUNT                            0x60ac
 #define AVIVO_D1CRTC_STEREO_CONTROL                             0x60c4
+
+#define AVIVO_D1MODE_MASTER_UPDATE_LOCK                         0x60e0
+#define AVIVO_D1MODE_MASTER_UPDATE_MODE                         0x60e4
+#define AVIVO_D1CRTC_UPDATE_LOCK                                0x60e8
 
 /* master controls */
 #define AVIVO_DC_CRTC_MASTER_EN                                 0x60f8
@@ -386,6 +393,11 @@
 #       define AVIVO_D1GRPH_TILED                               (1 << 20)
 #       define AVIVO_D1GRPH_MACRO_ADDRESS_MODE                  (1 << 21)
 
+#       define R600_D1GRPH_ARRAY_MODE_LINEAR_GENERAL            (0 << 20)
+#       define R600_D1GRPH_ARRAY_MODE_LINEAR_ALIGNED            (1 << 20)
+#       define R600_D1GRPH_ARRAY_MODE_1D_TILED_THIN1            (2 << 20)
+#       define R600_D1GRPH_ARRAY_MODE_2D_TILED_THIN1            (4 << 20)
+
 /* The R7xx *_HIGH surface regs are backwards; the D1 regs are in the D2
  * block and vice versa.  This applies to GRPH, CUR, etc.
  */
@@ -404,8 +416,10 @@
 #define AVIVO_D1GRPH_X_END                                      0x6134
 #define AVIVO_D1GRPH_Y_END                                      0x6138
 #define AVIVO_D1GRPH_UPDATE                                     0x6144
+#       define AVIVO_D1GRPH_SURFACE_UPDATE_PENDING              (1 << 2)
 #       define AVIVO_D1GRPH_UPDATE_LOCK                         (1 << 16)
 #define AVIVO_D1GRPH_FLIP_CONTROL                               0x6148
+#       define AVIVO_D1GRPH_SURFACE_UPDATE_H_RETRACE_EN         (1 << 0)
 
 #define AVIVO_D1CUR_CONTROL                     0x6400
 #       define AVIVO_D1CURSOR_EN                (1 << 0)
@@ -564,6 +578,7 @@
 
 #define AVIVO_TMDSA_CNTL                    0x7880
 #   define AVIVO_TMDSA_CNTL_ENABLE               (1 << 0)
+#   define AVIVO_TMDSA_CNTL_HDMI_EN              (1 << 2)
 #   define AVIVO_TMDSA_CNTL_HPD_MASK             (1 << 4)
 #   define AVIVO_TMDSA_CNTL_HPD_SELECT           (1 << 8)
 #   define AVIVO_TMDSA_CNTL_SYNC_PHASE           (1 << 12)
@@ -624,6 +639,7 @@
 
 #define AVIVO_LVTMA_CNTL					0x7a80
 #   define AVIVO_LVTMA_CNTL_ENABLE               (1 << 0)
+#   define AVIVO_LVTMA_CNTL_HDMI_EN              (1 << 2)
 #   define AVIVO_LVTMA_CNTL_HPD_MASK             (1 << 4)
 #   define AVIVO_LVTMA_CNTL_HPD_SELECT           (1 << 8)
 #   define AVIVO_LVTMA_CNTL_SYNC_PHASE           (1 << 12)

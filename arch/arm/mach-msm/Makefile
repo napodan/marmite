@@ -43,6 +43,7 @@ obj-$(CONFIG_MACH_BRAVO) += htc_acoustic_qsd.o
 obj-$(CONFIG_MACH_BRAVO) += board-bravo-tpa2018d1.o
 obj-$(CONFIG_MACH_BRAVO) += board-bravo-smb329.o
 obj-$(CONFIG_MACH_BRAVO) += devices_htc.o
+obj-$(CONFIG_MACH_BRAVO) += bravo/
 
 obj-$(CONFIG_HTC_PWRSINK) += htc_pwrsink.o
 obj-$(CONFIG_HTC_PWRSPLY) += htc_power_supply.o

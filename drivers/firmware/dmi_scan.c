@@ -2,9 +2,11 @@
 #include <linux/string.h>
 #include <linux/init.h>
 #include <linux/module.h>
+#include <linux/ctype.h>
 #include <linux/dmi.h>
 #include <linux/efi.h>
 #include <linux/bootmem.h>
+#include <linux/random.h>
 #include <asm/dmi.h>
 
 /*
@@ -14,10 +16,14 @@
  */
 static char dmi_empty_string[] = "        ";
 
+static u16 __initdata dmi_ver;
 /*
  * Catch too early calls to dmi_check_system():
  */
 static int dmi_initialized;
+
+/* DMI system identification string used during boot */
+static char dmi_ids_string[128] __initdata;
 
 static const char * __init dmi_string_nosave(const struct dmi_header *dm, u8 s)
 {
@@ -110,16 +116,18 @@ static int __init dmi_walk_early(void (*decode)(const struct dmi_header *,
 
 	dmi_table(buf, dmi_len, dmi_num, decode, NULL);
 
+	add_device_randomness(buf, dmi_len);
+
 	dmi_iounmap(buf, dmi_len);
 	return 0;
 }
 
-static int __init dmi_checksum(const u8 *buf)
+static int __init dmi_checksum(const u8 *buf, u8 len)
 {
 	u8 sum = 0;
 	int a;
 
-	for (a = 0; a < 15; a++)
+	for (a = 0; a < len; a++)
 		sum += buf[a];
 
 	return sum == 0;
@@ -157,8 +165,10 @@ static void __init dmi_save_uuid(const struct dmi_header *dm, int slot, int inde
 		return;
 
 	for (i = 0; i < 16 && (is_ff || is_00); i++) {
-		if(d[i] != 0x00) is_ff = 0;
-		if(d[i] != 0xFF) is_00 = 0;
+		if (d[i] != 0x00)
+			is_00 = 0;
+		if (d[i] != 0xFF)
+			is_ff = 0;
 	}
 
 	if (is_ff || is_00)
@@ -168,7 +178,15 @@ static void __init dmi_save_uuid(const struct dmi_header *dm, int slot, int inde
 	if (!s)
 		return;
 
-	sprintf(s, "%pUB", d);
+	/*
+	 * As of version 2.6 of the SMBIOS specification, the first 3 fields of
+	 * the UUID are supposed to be little-endian encoded.  The specification
+	 * says that this is the defacto standard.
+	 */
+	if (dmi_ver >= 0x0206)
+		sprintf(s, "%pUL", d);
+	else
+		sprintf(s, "%pUB", d);
 
         dmi_ident[slot] = s;
 }
@@ -277,6 +295,29 @@ static void __init dmi_save_ipmi_device(const struct dmi_header *dm)
 	list_add_tail(&dev->list, &dmi_devices);
 }
 
+static void __init dmi_save_dev_onboard(int instance, int segment, int bus,
+					int devfn, const char *name)
+{
+	struct dmi_dev_onboard *onboard_dev;
+
+	onboard_dev = dmi_alloc(sizeof(*onboard_dev) + strlen(name) + 1);
+	if (!onboard_dev) {
+		printk(KERN_ERR "dmi_save_dev_onboard: out of memory.\n");
+		return;
+	}
+	onboard_dev->instance = instance;
+	onboard_dev->segment = segment;
+	onboard_dev->bus = bus;
+	onboard_dev->devfn = devfn;
+
+	strcpy((char *)&onboard_dev[1], name);
+	onboard_dev->dev.type = DMI_DEV_TYPE_DEV_ONBOARD;
+	onboard_dev->dev.name = (char *)&onboard_dev[1];
+	onboard_dev->dev.device_data = onboard_dev;
+
+	list_add(&onboard_dev->dev.list, &dmi_devices);
+}
+
 static void __init dmi_save_extended_devices(const struct dmi_header *dm)
 {
 	const u8 *d = (u8*) dm + 5;
@@ -285,6 +326,8 @@ static void __init dmi_save_extended_devices(const struct dmi_header *dm)
 	if ((*d & 0x80) == 0)
 		return;
 
+	dmi_save_dev_onboard(*(d+1), *(u16 *)(d+2), *(d+4), *(d+5),
+			     dmi_string_nosave(dm, *(d-1)));
 	dmi_save_one_device(*d & 0x7f, dmi_string_nosave(dm, *(d - 1)));
 }
 
@@ -336,38 +379,105 @@ static void __init dmi_decode(const struct dmi_header *dm, void *dummy)
 	}
 }
 
-static int __init dmi_present(const char __iomem *p)
+static int __init print_filtered(char *buf, size_t len, const char *info)
 {
-	u8 buf[15];
+	int c = 0;
+	const char *p;
 
-	memcpy_fromio(buf, p, 15);
-	if ((memcmp(buf, "_DMI_", 5) == 0) && dmi_checksum(buf)) {
+	if (!info)
+		return c;
+
+	for (p = info; *p; p++)
+		if (isprint(*p))
+			c += scnprintf(buf + c, len - c, "%c", *p);
+		else
+			c += scnprintf(buf + c, len - c, "\\x%02x", *p & 0xff);
+	return c;
+}
+
+static void __init dmi_format_ids(char *buf, size_t len)
+{
+	int c = 0;
+	const char *board;	/* Board Name is optional */
+
+	c += print_filtered(buf + c, len - c,
+			    dmi_get_system_info(DMI_SYS_VENDOR));
+	c += scnprintf(buf + c, len - c, " ");
+	c += print_filtered(buf + c, len - c,
+			    dmi_get_system_info(DMI_PRODUCT_NAME));
+
+	board = dmi_get_system_info(DMI_BOARD_NAME);
+	if (board) {
+		c += scnprintf(buf + c, len - c, "/");
+		c += print_filtered(buf + c, len - c, board);
+	}
+	c += scnprintf(buf + c, len - c, ", BIOS ");
+	c += print_filtered(buf + c, len - c,
+			    dmi_get_system_info(DMI_BIOS_VERSION));
+	c += scnprintf(buf + c, len - c, " ");
+	c += print_filtered(buf + c, len - c,
+			    dmi_get_system_info(DMI_BIOS_DATE));
+}
+
+static int __init dmi_present(const u8 *buf)
+{
+	int smbios_ver;
+
+	if (memcmp(buf, "_SM_", 4) == 0 &&
+	    buf[5] < 32 && dmi_checksum(buf, buf[5])) {
+		smbios_ver = (buf[6] << 8) + buf[7];
+
+		/* Some BIOS report weird SMBIOS version, fix that up */
+		switch (smbios_ver) {
+		case 0x021F:
+		case 0x0221:
+			pr_debug("SMBIOS version fixup(2.%d->2.%d)\n",
+				 smbios_ver & 0xFF, 3);
+			smbios_ver = 0x0203;
+			break;
+		case 0x0233:
+			pr_debug("SMBIOS version fixup(2.%d->2.%d)\n", 51, 6);
+			smbios_ver = 0x0206;
+			break;
+		}
+	} else {
+		smbios_ver = 0;
+	}
+
+	buf += 16;
+
+	if (memcmp(buf, "_DMI_", 5) == 0 && dmi_checksum(buf, 15)) {
 		dmi_num = (buf[13] << 8) | buf[12];
 		dmi_len = (buf[7] << 8) | buf[6];
 		dmi_base = (buf[11] << 24) | (buf[10] << 16) |
 			(buf[9] << 8) | buf[8];
 
-		/*
-		 * DMI version 0.0 means that the real version is taken from
-		 * the SMBIOS version, which we don't know at this point.
-		 */
-		if (buf[14] != 0)
-			printk(KERN_INFO "DMI %d.%d present.\n",
-			       buf[14] >> 4, buf[14] & 0xF);
-		else
-			printk(KERN_INFO "DMI present.\n");
-		if (dmi_walk_early(dmi_decode) == 0)
+		if (dmi_walk_early(dmi_decode) == 0) {
+			if (smbios_ver) {
+				dmi_ver = smbios_ver;
+				pr_info("SMBIOS %d.%d present.\n",
+				       dmi_ver >> 8, dmi_ver & 0xFF);
+			} else {
+				dmi_ver = (buf[14] & 0xF0) << 4 |
+					   (buf[14] & 0x0F);
+				pr_info("Legacy DMI %d.%d present.\n",
+				       dmi_ver >> 8, dmi_ver & 0xFF);
+			}
+			dmi_format_ids(dmi_ids_string, sizeof(dmi_ids_string));
+			printk(KERN_DEBUG "DMI: %s\n", dmi_ids_string);
 			return 0;
+		}
 	}
+
 	return 1;
 }
 
 void __init dmi_scan_machine(void)
 {
 	char __iomem *p, *q;
-	int rc;
+	char buf[32];
 
-	if (efi_enabled) {
+	if (efi_enabled(EFI_CONFIG_TABLES)) {
 		if (efi.smbios == EFI_INVALID_TABLE_ADDR)
 			goto error;
 
@@ -378,10 +488,10 @@ void __init dmi_scan_machine(void)
 		p = dmi_ioremap(efi.smbios, 32);
 		if (p == NULL)
 			goto error;
-
-		rc = dmi_present(p + 0x10); /* offset of _DMI_ string */
+		memcpy_fromio(buf, p, 32);
 		dmi_iounmap(p, 32);
-		if (!rc) {
+
+		if (!dmi_present(buf)) {
 			dmi_available = 1;
 			goto out;
 		}
@@ -396,13 +506,15 @@ void __init dmi_scan_machine(void)
 		if (p == NULL)
 			goto error;
 
+		memset(buf, 0, 16);
 		for (q = p; q < p + 0x10000; q += 16) {
-			rc = dmi_present(q);
-			if (!rc) {
+			memcpy_fromio(buf + 16, q, 16);
+			if (!dmi_present(buf)) {
 				dmi_available = 1;
 				dmi_iounmap(p, 0x10000);
 				goto out;
 			}
+			memcpy(buf, buf + 16, 16);
 		}
 		dmi_iounmap(p, 0x10000);
 	}
@@ -410,6 +522,19 @@ void __init dmi_scan_machine(void)
 	printk(KERN_INFO "DMI not present or invalid.\n");
  out:
 	dmi_initialized = 1;
+}
+
+/**
+ * dmi_set_dump_stack_arch_desc - set arch description for dump_stack()
+ *
+ * Invoke dump_stack_set_arch_desc() with DMI system information so that
+ * DMI identifiers are printed out on task dumps.  Arch boot code should
+ * call this function after dmi_scan_machine() if it wants to print out DMI
+ * identifiers on task dumps.
+ */
+void __init dmi_set_dump_stack_arch_desc(void)
+{
+	dump_stack_set_arch_desc("%s", dmi_ids_string);
 }
 
 /**
@@ -426,9 +551,15 @@ static bool dmi_matches(const struct dmi_system_id *dmi)
 		int s = dmi->matches[i].slot;
 		if (s == DMI_NONE)
 			break;
-		if (dmi_ident[s]
-		    && strstr(dmi_ident[s], dmi->matches[i].substr))
-			continue;
+		if (dmi_ident[s]) {
+			if (!dmi->matches[i].exact_match &&
+			    strstr(dmi_ident[s], dmi->matches[i].substr))
+				continue;
+			else if (dmi->matches[i].exact_match &&
+				 !strcmp(dmi_ident[s], dmi->matches[i].substr))
+				continue;
+		}
+
 		/* No match */
 		return false;
 	}
@@ -523,14 +654,12 @@ int dmi_name_in_serial(const char *str)
 }
 
 /**
- *	dmi_name_in_vendors - Check if string is anywhere in the DMI vendor information.
+ *	dmi_name_in_vendors - Check if string is in the DMI system or board vendor name
  *	@str: 	Case sensitive Name
  */
 int dmi_name_in_vendors(const char *str)
 {
-	static int fields[] = { DMI_BIOS_VENDOR, DMI_BIOS_VERSION, DMI_SYS_VENDOR,
-				DMI_PRODUCT_NAME, DMI_PRODUCT_VERSION, DMI_BOARD_VENDOR,
-				DMI_BOARD_NAME, DMI_BOARD_VERSION, DMI_NONE };
+	static int fields[] = { DMI_SYS_VENDOR, DMI_BOARD_VENDOR, DMI_NONE };
 	int i;
 	for (i = 0; fields[i] != DMI_NONE; i++) {
 		int f = fields[i];

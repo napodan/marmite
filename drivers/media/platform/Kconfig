@@ -412,7 +412,7 @@ config VIDEO_VPX3220
 
 comment "Video and audio decoders"
 
-source "drivers/media/video/cx25840/Kconfig"
+source "drivers/media/platform/cx25840/Kconfig"
 
 comment "MPEG video encoders"
 
@@ -631,9 +631,9 @@ config VIDEO_ISIF
 	   To compile this driver as a module, choose M here: the
 	   module will be called vpfe.
 
-source "drivers/media/video/omap/Kconfig"
+source "drivers/media/platform/omap/Kconfig"
 
-source "drivers/media/video/bt8xx/Kconfig"
+source "drivers/media/platform/bt8xx/Kconfig"
 
 config VIDEO_PMS
 	tristate "Mediavision Pro Movie Studio Video For Linux"
@@ -718,7 +718,7 @@ config VIDEO_CPIA_USB
 	  otherwise say N. This will not work with the Creative Webcam III.
 	  It is also available as a module (cpia_usb).
 
-source "drivers/media/video/cpia2/Kconfig"
+source "drivers/media/platform/cpia2/Kconfig"
 
 config VIDEO_SAA5246A
 	tristate "SAA5246A, SAA5281 Teletext processor"
@@ -756,7 +756,7 @@ config VIDEO_STRADIS
 	  driver for PCI.  There is a product page at
 	  <http://www.stradis.com/>.
 
-source "drivers/media/video/zoran/Kconfig"
+source "drivers/media/platform/zoran/Kconfig"
 
 config VIDEO_MEYE
 	tristate "Sony Vaio Picturebook Motion Eye Video For Linux"
@@ -772,7 +772,7 @@ config VIDEO_MEYE
 	  To compile this driver as a module, choose M here: the
 	  module will be called meye.
 
-source "drivers/media/video/saa7134/Kconfig"
+source "drivers/media/platform/saa7134/Kconfig"
 
 config VIDEO_MXB
 	tristate "Siemens-Nixdorf 'Multimedia eXtension Board'"
@@ -813,17 +813,17 @@ config VIDEO_HEXIUM_GEMINI
 	  To compile this driver as a module, choose M here: the
 	  module will be called hexium_gemini.
 
-source "drivers/media/video/cx88/Kconfig"
+source "drivers/media/platform/cx88/Kconfig"
 
-source "drivers/media/video/cx23885/Kconfig"
+source "drivers/media/platform/cx23885/Kconfig"
 
-source "drivers/media/video/au0828/Kconfig"
+source "drivers/media/platform/au0828/Kconfig"
 
-source "drivers/media/video/ivtv/Kconfig"
+source "drivers/media/platform/ivtv/Kconfig"
 
-source "drivers/media/video/cx18/Kconfig"
+source "drivers/media/platform/cx18/Kconfig"
 
-source "drivers/media/video/saa7164/Kconfig"
+source "drivers/media/platform/saa7164/Kconfig"
 
 config VIDEO_M32R_AR
 	tristate "AR devices"
@@ -980,25 +980,25 @@ menuconfig V4L_USB_DRIVERS
 
 if V4L_USB_DRIVERS && USB
 
-source "drivers/media/video/uvc/Kconfig"
+source "drivers/media/platform/uvc/Kconfig"
 
-source "drivers/media/video/gspca/Kconfig"
+source "drivers/media/platform/gspca/Kconfig"
 
-source "drivers/media/video/pvrusb2/Kconfig"
+source "drivers/media/platform/pvrusb2/Kconfig"
 
-source "drivers/media/video/hdpvr/Kconfig"
+source "drivers/media/platform/hdpvr/Kconfig"
 
-source "drivers/media/video/em28xx/Kconfig"
+source "drivers/media/platform/em28xx/Kconfig"
 
-source "drivers/media/video/tlg2300/Kconfig"
+source "drivers/media/platform/tlg2300/Kconfig"
 
-source "drivers/media/video/cx231xx/Kconfig"
+source "drivers/media/platform/cx231xx/Kconfig"
 
-source "drivers/media/video/usbvision/Kconfig"
+source "drivers/media/platform/usbvision/Kconfig"
 
-source "drivers/media/video/usbvideo/Kconfig"
+source "drivers/media/platform/usbvideo/Kconfig"
 
-source "drivers/media/video/et61x251/Kconfig"
+source "drivers/media/platform/et61x251/Kconfig"
 
 config VIDEO_OVCAMCHIP
 	tristate "OmniVision Camera Chip support (DEPRECATED)"
@@ -1066,7 +1066,7 @@ config USB_SE401
 	  To compile this driver as a module, choose M here: the
 	  module will be called se401.
 
-source "drivers/media/video/sn9c102/Kconfig"
+source "drivers/media/platform/sn9c102/Kconfig"
 
 config USB_STV680
 	tristate "USB STV680 (Pencam) Camera support (DEPRECATED)"
@@ -1085,9 +1085,9 @@ config USB_STV680
 	  To compile this driver as a module, choose M here: the
 	  module will be called stv680.
 
-source "drivers/media/video/zc0301/Kconfig"
+source "drivers/media/platform/zc0301/Kconfig"
 
-source "drivers/media/video/pwc/Kconfig"
+source "drivers/media/platform/pwc/Kconfig"
 
 config USB_ZR364XX
 	tristate "USB ZR364XX Camera support"
@@ -1130,7 +1130,7 @@ endif # V4L_USB_DRIVERS
 endif # VIDEO_CAPTURE_DRIVERS
 
 # MSM camera does not require V4L2
-source "drivers/media/video/msm/Kconfig"
+source "drivers/media/platform/msm/Kconfig"
 
 menuconfig V4L_MEM2MEM_DRIVERS
 	bool "Memory-to-memory multimedia devices"

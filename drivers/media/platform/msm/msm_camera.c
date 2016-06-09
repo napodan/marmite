@@ -2538,34 +2538,6 @@ static int msm_tear_down_cdev(struct msm_device *msm, dev_t devno)
 	return 0;
 }
 
-#ifdef CONFIG_MSM_CAMERA_V4L2
-int msm_v4l2_register(struct msm_v4l2_driver *drv)
-{
-	/* FIXME: support multiple sensors */
-	if (list_empty(&msm_sensors))
-		return -ENODEV;
-
-	drv->sync = list_first_entry(&msm_sensors, struct msm_sync, list);
-	drv->open      = __msm_open;
-	drv->release   = __msm_release;
-	drv->ctrl      = __msm_v4l2_control;
-	drv->reg_pmem  = __msm_register_pmem;
-	drv->get_frame = __msm_get_frame;
-	drv->put_frame = __msm_put_frame_buf;
-	drv->get_pict  = __msm_get_pic;
-	drv->drv_poll  = __msm_poll_frame;
-
-	return 0;
-}
-EXPORT_SYMBOL(msm_v4l2_register);
-
-int msm_v4l2_unregister(struct msm_v4l2_driver *drv)
-{
-	drv->sync = NULL;
-	return 0;
-}
-EXPORT_SYMBOL(msm_v4l2_unregister);
-#endif
 
 static int msm_sync_init(struct msm_sync *sync,
 		struct platform_device *pdev,

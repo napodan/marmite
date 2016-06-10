@@ -1,5 +1,5 @@
 /*
- * DM646x display header file
+ * VPIF display header file
  *
  * Copyright (C) 2009 Texas Instruments Incorporated - http://www.ti.com/
  *
@@ -18,21 +18,15 @@
 
 /* Header files */
 #include <linux/videodev2.h>
-#include <linux/version.h>
 #include <media/v4l2-common.h>
 #include <media/v4l2-device.h>
-#include <media/videobuf-core.h>
-#include <media/videobuf-dma-contig.h>
+#include <media/videobuf2-dma-contig.h>
+#include <media/davinci/vpif_types.h>
 
 #include "vpif.h"
 
 /* Macros */
-#define VPIF_MAJOR_RELEASE	(0)
-#define VPIF_MINOR_RELEASE	(0)
-#define VPIF_BUILD		(1)
-
-#define VPIF_DISPLAY_VERSION_CODE \
-	((VPIF_MAJOR_RELEASE << 16) | (VPIF_MINOR_RELEASE << 8) | VPIF_BUILD)
+#define VPIF_DISPLAY_VERSION	"0.0.2"
 
 #define VPIF_VALID_FIELD(field) \
 	(((V4L2_FIELD_ANY == field) || (V4L2_FIELD_NONE == field)) || \
@@ -67,13 +61,12 @@ struct video_obj {
 					 * most recent displayed frame only */
 	v4l2_std_id stdid;		/* Currently selected or default
 					 * standard */
-	u32 output_id;			/* Current output id */
+	struct v4l2_dv_timings dv_timings;
 };
 
-struct vbi_obj {
-	int num_services;
-	struct vpif_vbi_params vbiparams;	/* vpif parameters for the raw
-						 * vbi data */
+struct vpif_disp_buffer {
+	struct vb2_buffer vb;
+	struct list_head list;
 };
 
 struct common_obj {
@@ -81,16 +74,19 @@ struct common_obj {
 	u8 *fbuffers[VIDEO_MAX_FRAME];		/* List of buffer pointers for
 						 * storing frames */
 	u32 numbuffers;				/* number of buffers */
-	struct videobuf_buffer *cur_frm;	/* Pointer pointing to current
-						 * videobuf_buffer */
-	struct videobuf_buffer *next_frm;	/* Pointer pointing to next
-						 * videobuf_buffer */
+	struct vpif_disp_buffer *cur_frm;	/* Pointer pointing to current
+						 * vb2_buffer */
+	struct vpif_disp_buffer *next_frm;	/* Pointer pointing to next
+						 * vb2_buffer */
 	enum v4l2_memory memory;		/* This field keeps track of
 						 * type of buffer exchange
 						 * method user has selected */
 	struct v4l2_format fmt;			/* Used to store the format */
-	struct videobuf_queue buffer_queue;	/* Buffer queue used in
+	struct vb2_queue buffer_queue;		/* Buffer queue used in
 						 * video-buf */
+	/* allocator-specific contexts for each plane */
+	struct vb2_alloc_ctx *alloc_ctx;
+
 	struct list_head dma_queue;		/* Queue of filled frames */
 	spinlock_t irqlock;			/* Used in video-buf */
 
@@ -128,12 +124,13 @@ struct channel_obj {
 					 * which is being displayed */
 	u8 initialized;			/* flag to indicate whether
 					 * encoder is initialized */
+	u32 output_idx;			/* Current output index */
+	struct v4l2_subdev *sd;		/* Current output subdev(may be NULL) */
 
 	enum vpif_channel_id channel_id;/* Identifies channel */
 	struct vpif_params vpifparams;
 	struct common_obj common[VPIF_NUMOBJECTS];
 	struct video_obj video;
-	struct vbi_obj vbi;
 };
 
 /* File handle structure */
@@ -161,15 +158,8 @@ struct vpif_config_params {
 	u32 min_bufsize[VPIF_DISPLAY_NUM_CHANNELS];
 	u32 channel_bufsize[VPIF_DISPLAY_NUM_CHANNELS];
 	u8 numbuffers[VPIF_DISPLAY_NUM_CHANNELS];
+	u32 video_limit[VPIF_DISPLAY_NUM_CHANNELS];
 	u8 min_numbuffers;
-};
-
-/* Struct which keeps track of the line numbers for the sliced vbi service */
-struct vpif_service_line {
-	u16 service_id;
-	u16 service_line[2];
-	u16 enc_service_id;
-	u8 bytestowrite;
 };
 
 #endif				/* DAVINCIHD_DISPLAY_H */

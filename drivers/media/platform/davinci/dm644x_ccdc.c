@@ -38,8 +38,8 @@
 #include <linux/uaccess.h>
 #include <linux/videodev2.h>
 #include <linux/gfp.h>
-#include <linux/clk.h>
 #include <linux/err.h>
+#include <linux/module.h>
 
 #include <media/davinci/dm644x_ccdc.h>
 #include <media/davinci/vpss.h>
@@ -59,10 +59,6 @@ static struct ccdc_oper_config {
 	struct ccdc_params_raw bayer;
 	/* YCbCr configuration */
 	struct ccdc_params_ycbcr ycbcr;
-	/* Master clock */
-	struct clk *mclk;
-	/* slave clock */
-	struct clk *sclk;
 	/* ccdc base address */
 	void __iomem *base_addr;
 } ccdc_cfg = {
@@ -227,9 +223,12 @@ static void ccdc_readregs(void)
 static int validate_ccdc_param(struct ccdc_config_params_raw *ccdcparam)
 {
 	if (ccdcparam->alaw.enable) {
-		if ((ccdcparam->alaw.gama_wd > CCDC_GAMMA_BITS_09_0) ||
-		    (ccdcparam->alaw.gama_wd < CCDC_GAMMA_BITS_15_6) ||
-		    (ccdcparam->alaw.gama_wd < ccdcparam->data_sz)) {
+		u8 max_gamma = ccdc_gamma_width_max_bit(ccdcparam->alaw.gamma_wd);
+		u8 max_data = ccdc_data_size_max_bit(ccdcparam->data_sz);
+
+		if ((ccdcparam->alaw.gamma_wd > CCDC_GAMMA_BITS_09_0) ||
+		    (ccdcparam->alaw.gamma_wd < CCDC_GAMMA_BITS_15_6) ||
+		    (max_gamma > max_data)) {
 			dev_dbg(ccdc_cfg.dev, "\nInvalid data line select");
 			return -1;
 		}
@@ -258,7 +257,7 @@ static int ccdc_update_raw_params(struct ccdc_config_params_raw *raw_params)
 	/*
 	 * Allocate memory for FPC table if current
 	 * FPC table buffer is not big enough to
-	 * accomodate FPC Number requested
+	 * accommodate FPC Number requested
 	 */
 	if (raw_params->fault_pxl.fp_num != config_params->fault_pxl.fp_num) {
 		if (fpc_physaddr != NULL) {
@@ -436,7 +435,7 @@ void ccdc_config_ycbcr(void)
 
 	/*
 	 * configure the horizontal line offset. This should be a
-	 * on 32 byte bondary. So clear LSB 5 bits
+	 * on 32 byte boundary. So clear LSB 5 bits
 	 */
 	regw(((params->win.width * 2  + 31) & ~0x1f), CCDC_HSIZE_OFF);
 
@@ -559,8 +558,8 @@ void ccdc_config_raw(void)
 
 	/* Enable and configure aLaw register if needed */
 	if (config_params->alaw.enable) {
-		val = ((config_params->alaw.gama_wd &
-		      CCDC_ALAW_GAMA_WD_MASK) | CCDC_ALAW_ENABLE);
+		val = ((config_params->alaw.gamma_wd &
+		      CCDC_ALAW_GAMMA_WD_MASK) | CCDC_ALAW_ENABLE);
 		regw(val, CCDC_ALAW);
 		dev_dbg(ccdc_cfg.dev, "\nWriting 0x%x to ALAW...\n", val);
 	}
@@ -956,7 +955,7 @@ static struct ccdc_hw_device ccdc_hw_dev = {
 	},
 };
 
-static int __init dm644x_ccdc_probe(struct platform_device *pdev)
+static int dm644x_ccdc_probe(struct platform_device *pdev)
 {
 	struct resource	*res;
 	int status = 0;
@@ -987,36 +986,9 @@ static int __init dm644x_ccdc_probe(struct platform_device *pdev)
 		goto fail_nomem;
 	}
 
-	/* Get and enable Master clock */
-	ccdc_cfg.mclk = clk_get(&pdev->dev, "master");
-	if (IS_ERR(ccdc_cfg.mclk)) {
-		status = PTR_ERR(ccdc_cfg.mclk);
-		goto fail_nomap;
-	}
-	if (clk_enable(ccdc_cfg.mclk)) {
-		status = -ENODEV;
-		goto fail_mclk;
-	}
-
-	/* Get and enable Slave clock */
-	ccdc_cfg.sclk = clk_get(&pdev->dev, "slave");
-	if (IS_ERR(ccdc_cfg.sclk)) {
-		status = PTR_ERR(ccdc_cfg.sclk);
-		goto fail_mclk;
-	}
-	if (clk_enable(ccdc_cfg.sclk)) {
-		status = -ENODEV;
-		goto fail_sclk;
-	}
 	ccdc_cfg.dev = &pdev->dev;
 	printk(KERN_NOTICE "%s is registered with vpfe.\n", ccdc_hw_dev.name);
 	return 0;
-fail_sclk:
-	clk_put(ccdc_cfg.sclk);
-fail_mclk:
-	clk_put(ccdc_cfg.mclk);
-fail_nomap:
-	iounmap(ccdc_cfg.base_addr);
 fail_nomem:
 	release_mem_region(res->start, resource_size(res));
 fail_nores:
@@ -1028,8 +1000,6 @@ static int dm644x_ccdc_remove(struct platform_device *pdev)
 {
 	struct resource	*res;
 
-	clk_put(ccdc_cfg.mclk);
-	clk_put(ccdc_cfg.sclk);
 	iounmap(ccdc_cfg.base_addr);
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (res)
@@ -1044,18 +1014,12 @@ static int dm644x_ccdc_suspend(struct device *dev)
 	ccdc_save_context();
 	/* Disable CCDC */
 	ccdc_enable(0);
-	/* Disable both master and slave clock */
-	clk_disable(ccdc_cfg.mclk);
-	clk_disable(ccdc_cfg.sclk);
 
 	return 0;
 }
 
 static int dm644x_ccdc_resume(struct device *dev)
 {
-	/* Enable both master and slave clock */
-	clk_enable(ccdc_cfg.mclk);
-	clk_enable(ccdc_cfg.sclk);
 	/* Restore CCDC context */
 	ccdc_restore_context();
 
@@ -1073,19 +1037,8 @@ static struct platform_driver dm644x_ccdc_driver = {
 		.owner = THIS_MODULE,
 		.pm = &dm644x_ccdc_pm_ops,
 	},
-	.remove = __devexit_p(dm644x_ccdc_remove),
+	.remove = dm644x_ccdc_remove,
 	.probe = dm644x_ccdc_probe,
 };
 
-static int __init dm644x_ccdc_init(void)
-{
-	return platform_driver_register(&dm644x_ccdc_driver);
-}
-
-static void __exit dm644x_ccdc_exit(void)
-{
-	platform_driver_unregister(&dm644x_ccdc_driver);
-}
-
-module_init(dm644x_ccdc_init);
-module_exit(dm644x_ccdc_exit);
+module_platform_driver(dm644x_ccdc_driver);

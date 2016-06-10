@@ -36,7 +36,6 @@
 #include <linux/slab.h>
 #include <linux/mm.h>
 #include <linux/time.h>
-#include <linux/version.h>
 #include <linux/kmod.h>
 
 #include <linux/i2c.h>
@@ -61,8 +60,7 @@
 // #define VINO_DEBUG
 // #define VINO_DEBUG_INT
 
-#define VINO_MODULE_VERSION "0.0.6"
-#define VINO_VERSION_CODE KERNEL_VERSION(0, 0, 6)
+#define VINO_MODULE_VERSION "0.0.7"
 
 MODULE_DESCRIPTION("SGI VINO Video4Linux2 driver");
 MODULE_VERSION(VINO_MODULE_VERSION);
@@ -710,7 +708,7 @@ static int vino_allocate_buffer(struct vino_framebuffer *fb,
 		size, count);
 
 	/* allocate memory for table with virtual (page) addresses */
-	fb->desc_table.virtual = (unsigned long *)
+	fb->desc_table.virtual =
 		kmalloc(count * sizeof(unsigned long), GFP_KERNEL);
 	if (!fb->desc_table.virtual)
 		return -ENOMEM;
@@ -2476,8 +2474,8 @@ static irqreturn_t vino_interrupt(int irq, void *dev_id)
 
 		if ((!handled_a) && (done_a || skip_a)) {
 			if (!skip_a) {
-				do_gettimeofday(&vino_drvdata->
-						a.int_data.timestamp);
+				v4l2_get_timestamp(
+					&vino_drvdata->a.int_data.timestamp);
 				vino_drvdata->a.int_data.frame_counter = fc_a;
 			}
 			vino_drvdata->a.int_data.skip = skip_a;
@@ -2491,8 +2489,8 @@ static irqreturn_t vino_interrupt(int irq, void *dev_id)
 
 		if ((!handled_b) && (done_b || skip_b)) {
 			if (!skip_b) {
-				do_gettimeofday(&vino_drvdata->
-						b.int_data.timestamp);
+				v4l2_get_timestamp(
+					&vino_drvdata->b.int_data.timestamp);
 				vino_drvdata->b.int_data.frame_counter = fc_b;
 			}
 			vino_drvdata->b.int_data.skip = skip_b;
@@ -2563,7 +2561,7 @@ static int vino_acquire_input(struct vino_channel_settings *vcs)
 	} else if (vino_drvdata->decoder
 		   && (vino_drvdata->decoder_owner == VINO_NO_CHANNEL)) {
 		int input;
-		int data_norm;
+		int data_norm = 0;
 		v4l2_std_id norm;
 
 		input = VINO_INPUT_COMPOSITE;
@@ -2653,7 +2651,7 @@ static int vino_set_input(struct vino_channel_settings *vcs, int input)
 		}
 
 		if (vino_drvdata->decoder_owner == vcs->channel) {
-			int data_norm;
+			int data_norm = 0;
 			v4l2_std_id norm;
 
 			ret = decoder_call(video, s_routing,
@@ -2934,7 +2932,6 @@ static int vino_querycap(struct file *file, void *__fh,
 	strcpy(cap->driver, vino_driver_name);
 	strcpy(cap->card, vino_driver_description);
 	strcpy(cap->bus_info, vino_bus_name);
-	cap->version = VINO_VERSION_CODE;
 	cap->capabilities =
 		V4L2_CAP_VIDEO_CAPTURE |
 		V4L2_CAP_STREAMING;
@@ -2954,9 +2951,6 @@ static int vino_enum_input(struct file *file, void *__fh,
 	if (input == VINO_INPUT_NONE)
 		return -EINVAL;
 
-	memset(i, 0, sizeof(struct v4l2_input));
-
-	i->index = index;
 	i->type = V4L2_INPUT_TYPE_CAMERA;
 	i->std = vino_inputs[input].std;
 	strcpy(i->name, vino_inputs[input].name);
@@ -3048,7 +3042,7 @@ static int vino_g_std(struct file *file, void *__fh,
 }
 
 static int vino_s_std(struct file *file, void *__fh,
-			   v4l2_std_id *std)
+			   v4l2_std_id std)
 {
 	struct vino_channel_settings *vcs = video_drvdata(file);
 	unsigned long flags;
@@ -3062,7 +3056,7 @@ static int vino_s_std(struct file *file, void *__fh,
 	}
 
 	/* check if the standard is valid for the current input */
-	if ((*std) & vino_inputs[vcs->input].std) {
+	if (std & vino_inputs[vcs->input].std) {
 		dprintk("standard accepted\n");
 
 		/* change the video norm for SAA7191
@@ -3071,13 +3065,13 @@ static int vino_s_std(struct file *file, void *__fh,
 		if (vcs->input == VINO_INPUT_D1)
 			goto out;
 
-		if ((*std) & V4L2_STD_PAL) {
+		if (std & V4L2_STD_PAL) {
 			ret = vino_set_data_norm(vcs, VINO_DATA_NORM_PAL,
 						 &flags);
-		} else if ((*std) & V4L2_STD_NTSC) {
+		} else if (std & V4L2_STD_NTSC) {
 			ret = vino_set_data_norm(vcs, VINO_DATA_NORM_NTSC,
 						 &flags);
-		} else if ((*std) & V4L2_STD_SECAM) {
+		} else if (std & V4L2_STD_SECAM) {
 			ret = vino_set_data_norm(vcs, VINO_DATA_NORM_SECAM,
 						 &flags);
 		} else {
@@ -3290,7 +3284,7 @@ static int vino_g_crop(struct file *file, void *__fh,
 }
 
 static int vino_s_crop(struct file *file, void *__fh,
-			    struct v4l2_crop *c)
+			    const struct v4l2_crop *c)
 {
 	struct vino_channel_settings *vcs = video_drvdata(file);
 	unsigned long flags;
@@ -3415,6 +3409,9 @@ static void vino_v4l2_get_buffer_status(struct vino_channel_settings *vcs,
 
 	if (fb->map_count > 0)
 		b->flags |= V4L2_BUF_FLAG_MAPPED;
+
+	b->flags &= ~V4L2_BUF_FLAG_TIMESTAMP_MASK;
+	b->flags |= V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 
 	b->index = fb->id;
 	b->memory = (vcs->fb_queue.type == VINO_MEMORY_MMAP) ?
@@ -3956,7 +3953,7 @@ found:
 
 	fb->map_count = 1;
 
-	vma->vm_flags |= VM_DONTEXPAND | VM_RESERVED;
+	vma->vm_flags |= VM_DONTEXPAND | VM_DONTDUMP;
 	vma->vm_flags &= ~VM_IO;
 	vma->vm_private_data = fb;
 	vma->vm_file = file;
@@ -4334,10 +4331,10 @@ static int __init vino_module_init(void)
 
 	vino_drvdata->decoder =
 		v4l2_i2c_new_subdev(&vino_drvdata->v4l2_dev, &vino_i2c_adapter,
-			       "saa7191", "saa7191", 0, I2C_ADDRS(0x45));
+			       "saa7191", 0, I2C_ADDRS(0x45));
 	vino_drvdata->camera =
 		v4l2_i2c_new_subdev(&vino_drvdata->v4l2_dev, &vino_i2c_adapter,
-			       "indycam", "indycam", 0, I2C_ADDRS(0x2b));
+			       "indycam", 0, I2C_ADDRS(0x2b));
 
 	dprintk("init complete!\n");
 

@@ -42,17 +42,11 @@
 #include <sound/initval.h>
 #include <sound/soc.h>
 
-#include <mach/hardware.h>
-
 #include "atmel-pcm.h"
 #include "atmel_ssc_dai.h"
 
 
-#if defined(CONFIG_ARCH_AT91SAM9260) || defined(CONFIG_ARCH_AT91SAM9G20)
-#define NUM_SSC_DEVICES		1
-#else
 #define NUM_SSC_DEVICES		3
-#endif
 
 /*
  * SSC PDC registers required by the PCM DMA engine.
@@ -107,7 +101,6 @@ static struct atmel_pcm_dma_params ssc_dma_params[NUM_SSC_DEVICES][2] = {
 	.pdc		= &pdc_rx_reg,
 	.mask		= &ssc_rx_mask,
 	} },
-#if NUM_SSC_DEVICES == 3
 	{{
 	.name		= "SSC1 PCM out",
 	.pdc		= &pdc_tx_reg,
@@ -128,7 +121,6 @@ static struct atmel_pcm_dma_params ssc_dma_params[NUM_SSC_DEVICES][2] = {
 	.pdc		= &pdc_rx_reg,
 	.mask		= &ssc_rx_mask,
 	} },
-#endif
 };
 
 
@@ -139,7 +131,6 @@ static struct atmel_ssc_info ssc_info[NUM_SSC_DEVICES] = {
 	.dir_mask	= SSC_DIR_MASK_UNUSED,
 	.initialized	= 0,
 	},
-#if NUM_SSC_DEVICES == 3
 	{
 	.name		= "ssc1",
 	.lock		= __SPIN_LOCK_UNLOCKED(ssc_info[1].lock),
@@ -152,7 +143,6 @@ static struct atmel_ssc_info ssc_info[NUM_SSC_DEVICES] = {
 	.dir_mask	= SSC_DIR_MASK_UNUSED,
 	.initialized	= 0,
 	},
-#endif
 };
 
 
@@ -205,8 +195,7 @@ static irqreturn_t atmel_ssc_interrupt(int irq, void *dev_id)
 static int atmel_ssc_startup(struct snd_pcm_substream *substream,
 			     struct snd_soc_dai *dai)
 {
-	struct snd_soc_pcm_runtime *rtd = snd_pcm_substream_chip(substream);
-	struct atmel_ssc_info *ssc_p = &ssc_info[rtd->dai->cpu_dai->id];
+	struct atmel_ssc_info *ssc_p = &ssc_info[dai->id];
 	int dir_mask;
 
 	pr_debug("atmel_ssc_startup: SSC_SR=0x%u\n",
@@ -235,8 +224,7 @@ static int atmel_ssc_startup(struct snd_pcm_substream *substream,
 static void atmel_ssc_shutdown(struct snd_pcm_substream *substream,
 			       struct snd_soc_dai *dai)
 {
-	struct snd_soc_pcm_runtime *rtd = snd_pcm_substream_chip(substream);
-	struct atmel_ssc_info *ssc_p = &ssc_info[rtd->dai->cpu_dai->id];
+	struct atmel_ssc_info *ssc_p = &ssc_info[dai->id];
 	struct atmel_pcm_dma_params *dma_params;
 	int dir, dir_mask;
 
@@ -338,12 +326,11 @@ static int atmel_ssc_hw_params(struct snd_pcm_substream *substream,
 	struct snd_soc_dai *dai)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_pcm_substream_chip(substream);
-	int id = rtd->dai->cpu_dai->id;
+	int id = dai->id;
 	struct atmel_ssc_info *ssc_p = &ssc_info[id];
 	struct atmel_pcm_dma_params *dma_params;
 	int dir, channels, bits;
 	u32 tfmr, rfmr, tcmr, rcmr;
-	int start_event;
 	int ret;
 
 	/*
@@ -368,7 +355,7 @@ static int atmel_ssc_hw_params(struct snd_pcm_substream *substream,
 	 * function.  It should not be used for other purposes
 	 * as it is common to all substreams.
 	 */
-	snd_soc_dai_set_dma_data(rtd->dai->cpu_dai, substream, dma_params);
+	snd_soc_dai_set_dma_data(rtd->cpu_dai, substream, dma_params);
 
 	channels = params_channels(params);
 
@@ -404,7 +391,7 @@ static int atmel_ssc_hw_params(struct snd_pcm_substream *substream,
 	if ((ssc_p->daifmt & SND_SOC_DAIFMT_FORMAT_MASK) == SND_SOC_DAIFMT_I2S
 		&& bits > 16) {
 		printk(KERN_WARNING
-				"atmel_ssc_dai: sample size %d"
+				"atmel_ssc_dai: sample size %d "
 				"is too large for I2S\n", bits);
 		return -EINVAL;
 	}
@@ -462,19 +449,10 @@ static int atmel_ssc_hw_params(struct snd_pcm_substream *substream,
 		 * The SSC transmit clock is obtained from the BCLK signal on
 		 * on the TK line, and the SSC receive clock is
 		 * generated from the transmit clock.
-		 *
-		 *  For single channel data, one sample is transferred
-		 * on the falling edge of the LRC clock.
-		 * For two channel data, one sample is
-		 * transferred on both edges of the LRC clock.
 		 */
-		start_event = ((channels == 1)
-				? SSC_START_FALLING_RF
-				: SSC_START_EDGE_RF);
-
 		rcmr =	  SSC_BF(RCMR_PERIOD, 0)
 			| SSC_BF(RCMR_STTDLY, START_DELAY)
-			| SSC_BF(RCMR_START, start_event)
+			| SSC_BF(RCMR_START, SSC_START_FALLING_RF)
 			| SSC_BF(RCMR_CKI, SSC_CKI_RISING)
 			| SSC_BF(RCMR_CKO, SSC_CKO_NONE)
 			| SSC_BF(RCMR_CKS, SSC_CKS_CLOCK);
@@ -482,14 +460,14 @@ static int atmel_ssc_hw_params(struct snd_pcm_substream *substream,
 		rfmr =	  SSC_BF(RFMR_FSEDGE, SSC_FSEDGE_POSITIVE)
 			| SSC_BF(RFMR_FSOS, SSC_FSOS_NONE)
 			| SSC_BF(RFMR_FSLEN, 0)
-			| SSC_BF(RFMR_DATNB, 0)
+			| SSC_BF(RFMR_DATNB, (channels - 1))
 			| SSC_BIT(RFMR_MSBF)
 			| SSC_BF(RFMR_LOOP, 0)
 			| SSC_BF(RFMR_DATLEN, (bits - 1));
 
 		tcmr =	  SSC_BF(TCMR_PERIOD, 0)
 			| SSC_BF(TCMR_STTDLY, START_DELAY)
-			| SSC_BF(TCMR_START, start_event)
+			| SSC_BF(TCMR_START, SSC_START_FALLING_RF)
 			| SSC_BF(TCMR_CKI, SSC_CKI_FALLING)
 			| SSC_BF(TCMR_CKO, SSC_CKO_NONE)
 			| SSC_BF(TCMR_CKS, SSC_CKS_PIN);
@@ -498,7 +476,7 @@ static int atmel_ssc_hw_params(struct snd_pcm_substream *substream,
 			| SSC_BF(TFMR_FSDEN, 0)
 			| SSC_BF(TFMR_FSOS, SSC_FSOS_NONE)
 			| SSC_BF(TFMR_FSLEN, 0)
-			| SSC_BF(TFMR_DATNB, 0)
+			| SSC_BF(TFMR_DATNB, (channels - 1))
 			| SSC_BIT(TFMR_MSBF)
 			| SSC_BF(TFMR_DATDEF, 0)
 			| SSC_BF(TFMR_DATLEN, (bits - 1));
@@ -545,11 +523,53 @@ static int atmel_ssc_hw_params(struct snd_pcm_substream *substream,
 		break;
 
 	case SND_SOC_DAIFMT_DSP_A | SND_SOC_DAIFMT_CBM_CFM:
+		/*
+		 * DSP/PCM Mode A format, CODEC supplies BCLK and LRC clocks.
+		 *
+		 * The SSC transmit clock is obtained from the BCLK signal on
+		 * on the TK line, and the SSC receive clock is
+		 * generated from the transmit clock.
+		 *
+		 * Data is transferred on first BCLK after LRC pulse rising
+		 * edge.If stereo, the right channel data is contiguous with
+		 * the left channel data.
+		 */
+		rcmr =	  SSC_BF(RCMR_PERIOD, 0)
+			| SSC_BF(RCMR_STTDLY, START_DELAY)
+			| SSC_BF(RCMR_START, SSC_START_RISING_RF)
+			| SSC_BF(RCMR_CKI, SSC_CKI_RISING)
+			| SSC_BF(RCMR_CKO, SSC_CKO_NONE)
+			| SSC_BF(RCMR_CKS, SSC_CKS_PIN);
+
+		rfmr =	  SSC_BF(RFMR_FSEDGE, SSC_FSEDGE_POSITIVE)
+			| SSC_BF(RFMR_FSOS, SSC_FSOS_NONE)
+			| SSC_BF(RFMR_FSLEN, 0)
+			| SSC_BF(RFMR_DATNB, (channels - 1))
+			| SSC_BIT(RFMR_MSBF)
+			| SSC_BF(RFMR_LOOP, 0)
+			| SSC_BF(RFMR_DATLEN, (bits - 1));
+
+		tcmr =	  SSC_BF(TCMR_PERIOD, 0)
+			| SSC_BF(TCMR_STTDLY, START_DELAY)
+			| SSC_BF(TCMR_START, SSC_START_RISING_RF)
+			| SSC_BF(TCMR_CKI, SSC_CKI_FALLING)
+			| SSC_BF(TCMR_CKO, SSC_CKO_NONE)
+			| SSC_BF(TCMR_CKS, SSC_CKS_PIN);
+
+		tfmr =	  SSC_BF(TFMR_FSEDGE, SSC_FSEDGE_POSITIVE)
+			| SSC_BF(TFMR_FSDEN, 0)
+			| SSC_BF(TFMR_FSOS, SSC_FSOS_NONE)
+			| SSC_BF(TFMR_FSLEN, 0)
+			| SSC_BF(TFMR_DATNB, (channels - 1))
+			| SSC_BIT(TFMR_MSBF)
+			| SSC_BF(TFMR_DATDEF, 0)
+			| SSC_BF(TFMR_DATLEN, (bits - 1));
+		break;
+
 	default:
 		printk(KERN_WARNING "atmel_ssc_dai: unsupported DAI format 0x%x\n",
 			ssc_p->daifmt);
 		return -EINVAL;
-		break;
 	}
 	pr_debug("atmel_ssc_hw_params: "
 			"RCMR=%08x RFMR=%08x TCMR=%08x TFMR=%08x\n",
@@ -606,8 +626,7 @@ static int atmel_ssc_hw_params(struct snd_pcm_substream *substream,
 static int atmel_ssc_prepare(struct snd_pcm_substream *substream,
 			     struct snd_soc_dai *dai)
 {
-	struct snd_soc_pcm_runtime *rtd = snd_pcm_substream_chip(substream);
-	struct atmel_ssc_info *ssc_p = &ssc_info[rtd->dai->cpu_dai->id];
+	struct atmel_ssc_info *ssc_p = &ssc_info[dai->id];
 	struct atmel_pcm_dma_params *dma_params;
 	int dir;
 
@@ -676,7 +695,7 @@ static int atmel_ssc_resume(struct snd_soc_dai *cpu_dai)
 	/* re-enable interrupts */
 	ssc_writel(ssc_p->ssc->regs, IER, ssc_p->ssc_state.ssc_imr);
 
-	/* Re-enable recieve and transmit as appropriate */
+	/* Re-enable receive and transmit as appropriate */
 	cr = 0;
 	cr |=
 	    (ssc_p->ssc_state.ssc_sr & SSC_BIT(SR_RXEN)) ? SSC_BIT(CR_RXEN) : 0;
@@ -691,13 +710,12 @@ static int atmel_ssc_resume(struct snd_soc_dai *cpu_dai)
 #  define atmel_ssc_resume	NULL
 #endif /* CONFIG_PM */
 
-
 #define ATMEL_SSC_RATES (SNDRV_PCM_RATE_8000_96000)
 
 #define ATMEL_SSC_FORMATS (SNDRV_PCM_FMTBIT_S8     | SNDRV_PCM_FMTBIT_S16_LE |\
 			  SNDRV_PCM_FMTBIT_S24_LE | SNDRV_PCM_FMTBIT_S32_LE)
 
-static struct snd_soc_dai_ops atmel_ssc_dai_ops = {
+static const struct snd_soc_dai_ops atmel_ssc_dai_ops = {
 	.startup	= atmel_ssc_startup,
 	.shutdown	= atmel_ssc_shutdown,
 	.prepare	= atmel_ssc_prepare,
@@ -706,9 +724,7 @@ static struct snd_soc_dai_ops atmel_ssc_dai_ops = {
 	.set_clkdiv	= atmel_ssc_set_dai_clkdiv,
 };
 
-struct snd_soc_dai atmel_ssc_dai[NUM_SSC_DEVICES] = {
-	{	.name = "atmel-ssc0",
-		.id = 0,
+static struct snd_soc_dai_driver atmel_ssc_dai = {
 		.suspend = atmel_ssc_suspend,
 		.resume = atmel_ssc_resume,
 		.playback = {
@@ -722,58 +738,88 @@ struct snd_soc_dai atmel_ssc_dai[NUM_SSC_DEVICES] = {
 			.rates = ATMEL_SSC_RATES,
 			.formats = ATMEL_SSC_FORMATS,},
 		.ops = &atmel_ssc_dai_ops,
-		.private_data = &ssc_info[0],
-	},
-#if NUM_SSC_DEVICES == 3
-	{	.name = "atmel-ssc1",
-		.id = 1,
-		.suspend = atmel_ssc_suspend,
-		.resume = atmel_ssc_resume,
-		.playback = {
-			.channels_min = 1,
-			.channels_max = 2,
-			.rates = ATMEL_SSC_RATES,
-			.formats = ATMEL_SSC_FORMATS,},
-		.capture = {
-			.channels_min = 1,
-			.channels_max = 2,
-			.rates = ATMEL_SSC_RATES,
-			.formats = ATMEL_SSC_FORMATS,},
-		.ops = &atmel_ssc_dai_ops,
-		.private_data = &ssc_info[1],
-	},
-	{	.name = "atmel-ssc2",
-		.id = 2,
-		.suspend = atmel_ssc_suspend,
-		.resume = atmel_ssc_resume,
-		.playback = {
-			.channels_min = 1,
-			.channels_max = 2,
-			.rates = ATMEL_SSC_RATES,
-			.formats = ATMEL_SSC_FORMATS,},
-		.capture = {
-			.channels_min = 1,
-			.channels_max = 2,
-			.rates = ATMEL_SSC_RATES,
-			.formats = ATMEL_SSC_FORMATS,},
-		.ops = &atmel_ssc_dai_ops,
-		.private_data = &ssc_info[2],
-	},
-#endif
 };
-EXPORT_SYMBOL_GPL(atmel_ssc_dai);
 
-static int __init atmel_ssc_modinit(void)
-{
-	return snd_soc_register_dais(atmel_ssc_dai, ARRAY_SIZE(atmel_ssc_dai));
-}
-module_init(atmel_ssc_modinit);
+static const struct snd_soc_component_driver atmel_ssc_component = {
+	.name		= "atmel-ssc",
+};
 
-static void __exit atmel_ssc_modexit(void)
+static int asoc_ssc_init(struct device *dev)
 {
-	snd_soc_unregister_dais(atmel_ssc_dai, ARRAY_SIZE(atmel_ssc_dai));
+	struct platform_device *pdev = to_platform_device(dev);
+	struct ssc_device *ssc = platform_get_drvdata(pdev);
+	int ret;
+
+	ret = snd_soc_register_component(dev, &atmel_ssc_component,
+					 &atmel_ssc_dai, 1);
+	if (ret) {
+		dev_err(dev, "Could not register DAI: %d\n", ret);
+		goto err;
+	}
+
+	if (ssc->pdata->use_dma)
+		ret = atmel_pcm_dma_platform_register(dev);
+	else
+		ret = atmel_pcm_pdc_platform_register(dev);
+
+	if (ret) {
+		dev_err(dev, "Could not register PCM: %d\n", ret);
+		goto err_unregister_dai;
+	};
+
+	return 0;
+
+err_unregister_dai:
+	snd_soc_unregister_component(dev);
+err:
+	return ret;
 }
-module_exit(atmel_ssc_modexit);
+
+static void asoc_ssc_exit(struct device *dev)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	struct ssc_device *ssc = platform_get_drvdata(pdev);
+
+	if (ssc->pdata->use_dma)
+		atmel_pcm_dma_platform_unregister(dev);
+	else
+		atmel_pcm_pdc_platform_unregister(dev);
+
+	snd_soc_unregister_component(dev);
+}
+
+/**
+ * atmel_ssc_set_audio - Allocate the specified SSC for audio use.
+ */
+int atmel_ssc_set_audio(int ssc_id)
+{
+	struct ssc_device *ssc;
+	int ret;
+
+	/* If we can grab the SSC briefly to parent the DAI device off it */
+	ssc = ssc_request(ssc_id);
+	if (IS_ERR(ssc)) {
+		pr_err("Unable to parent ASoC SSC DAI on SSC: %ld\n",
+			PTR_ERR(ssc));
+		return PTR_ERR(ssc);
+	} else {
+		ssc_info[ssc_id].ssc = ssc;
+	}
+
+	ret = asoc_ssc_init(&ssc->pdev->dev);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(atmel_ssc_set_audio);
+
+void atmel_ssc_put_audio(int ssc_id)
+{
+	struct ssc_device *ssc = ssc_info[ssc_id].ssc;
+
+	asoc_ssc_exit(&ssc->pdev->dev);
+	ssc_free(ssc);
+}
+EXPORT_SYMBOL_GPL(atmel_ssc_put_audio);
 
 /* Module information */
 MODULE_AUTHOR("Sedji Gaouaou, sedji.gaouaou@atmel.com, www.atmel.com");

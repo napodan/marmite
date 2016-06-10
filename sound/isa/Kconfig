@@ -77,6 +77,32 @@ config SND_ALS100
 	  To compile this driver as a module, choose M here: the module
 	  will be called snd-als100.
 
+config SND_AZT1605
+	tristate "Aztech AZT1605 Driver"
+	depends on SND
+	select SND_WSS_LIB
+	select SND_MPU401_UART
+	select SND_OPL3_LIB
+	help
+	  Say Y here to include support for Aztech Sound Galaxy cards
+	  based on the AZT1605 chipset.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called snd-azt1605.
+
+config SND_AZT2316
+	tristate "Aztech AZT2316 Driver"
+	depends on SND
+	select SND_WSS_LIB
+	select SND_MPU401_UART
+	select SND_OPL3_LIB
+	help
+	  Say Y here to include support for Aztech Sound Galaxy cards
+	  based on the AZT2316 chipset.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called snd-azt2316.
+
 config SND_AZT2320
 	tristate "Aztech Systems AZT2320"
 	depends on PNP
@@ -90,6 +116,18 @@ config SND_AZT2320
 
 	  To compile this driver as a module, choose M here: the module
 	  will be called snd-azt2320.
+
+config SND_CMI8328
+	tristate "C-Media CMI8328"
+	select SND_WSS_LIB
+	select SND_OPL3_LIB
+	select SND_MPU401_UART
+	help
+	  Say Y here to include support for soundcards based on the
+	  C-Media CMI8328 chip.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called snd-cmi8328.
 
 config SND_CMI8330
 	tristate "C-Media CMI8330"
@@ -153,7 +191,7 @@ config SND_ES18XX
 
 config SND_SC6000
 	tristate "Gallant SC-6000/6600/7000 and Audio Excel DSP 16"
-	depends on HAS_IOPORT
+	depends on HAS_IOPORT_MAP
 	select SND_WSS_LIB
 	select SND_OPL3_LIB
 	select SND_MPU401_UART
@@ -351,16 +389,6 @@ config SND_SB16_CSP
 	  coprocessor can do variable tasks like various compression and
 	  decompression algorithms.
 
-config SND_SGALAXY
-	tristate "Aztech Sound Galaxy"
-	select SND_WSS_LIB
-	help
-	  Say Y here to include support for Aztech Sound Galaxy
-	  soundcards.
-
-	  To compile this driver as a module, choose M here: the module
-	  will be called snd-sgalaxy.
-
 config SND_SSCAPE
 	tristate "Ensoniq SoundScape driver"
 	select SND_MPU401_UART
@@ -397,7 +425,7 @@ config SND_WAVEFRONT
 
 config SND_MSND_PINNACLE
 	tristate "Turtle Beach MultiSound Pinnacle/Fiji driver"
-	depends on X86 && EXPERIMENTAL
+	depends on X86
 	select FW_LOADER
 	select SND_MPU401_UART
 	select SND_PCM
@@ -410,7 +438,7 @@ config SND_MSND_PINNACLE
 
 config SND_MSND_CLASSIC
 	tristate "Support for Turtle Beach MultiSound Classic, Tahiti, Monterey"
-	depends on X86 && EXPERIMENTAL
+	depends on X86
 	select FW_LOADER
 	select SND_MPU401_UART
 	select SND_PCM

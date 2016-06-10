@@ -116,6 +116,8 @@ struct atmel_ssc_info {
 	struct atmel_pcm_dma_params *dma_params[2];
 	struct atmel_ssc_state ssc_state;
 };
-extern struct snd_soc_dai atmel_ssc_dai[];
+
+int atmel_ssc_set_audio(int ssc_id);
+void atmel_ssc_put_audio(int ssc_id);
 
 #endif /* _AT91_SSC_DAI_H */

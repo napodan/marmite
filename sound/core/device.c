@@ -21,6 +21,7 @@
 
 #include <linux/slab.h>
 #include <linux/time.h>
+#include <linux/export.h>
 #include <linux/errno.h>
 #include <sound/core.h>
 
@@ -38,7 +39,7 @@
  * The data pointer plays a role as the identifier, too, so the
  * pointer address must be unique and unchanged.
  *
- * Returns zero if successful, or a negative error code on failure.
+ * Return: Zero if successful, or a negative error code on failure.
  */
 int snd_device_new(struct snd_card *card, snd_device_type_t type,
 		   void *device_data, struct snd_device_ops *ops)
@@ -72,7 +73,7 @@ EXPORT_SYMBOL(snd_device_new);
  * callbacks, dev_disconnect and dev_free, corresponding to the state.
  * Then release the device.
  *
- * Returns zero if successful, or a negative error code on failure or if the
+ * Return: Zero if successful, or a negative error code on failure or if the
  * device not found.
  */
 int snd_device_free(struct snd_card *card, void *device_data)
@@ -115,7 +116,7 @@ EXPORT_SYMBOL(snd_device_free);
  *
  * Usually called from snd_card_disconnect().
  *
- * Returns zero if successful, or a negative error code on failure or if the
+ * Return: Zero if successful, or a negative error code on failure or if the
  * device not found.
  */
 int snd_device_disconnect(struct snd_card *card, void *device_data)
@@ -150,7 +151,7 @@ int snd_device_disconnect(struct snd_card *card, void *device_data)
  * but it can be called later if any new devices are created after
  * invocation of snd_card_register().
  *
- * Returns zero if successful, or a negative error code on failure or if the
+ * Return: Zero if successful, or a negative error code on failure or if the
  * device not found.
  */
 int snd_device_register(struct snd_card *card, void *device_data)
@@ -225,15 +226,16 @@ int snd_device_free_all(struct snd_card *card, snd_device_cmd_t cmd)
 {
 	struct snd_device *dev;
 	int err;
-	unsigned int range_low, range_high;
+	unsigned int range_low, range_high, type;
 
 	if (snd_BUG_ON(!card))
 		return -ENXIO;
-	range_low = cmd * SNDRV_DEV_TYPE_RANGE_SIZE;
+	range_low = (__force unsigned int)cmd * SNDRV_DEV_TYPE_RANGE_SIZE;
 	range_high = range_low + SNDRV_DEV_TYPE_RANGE_SIZE - 1;
       __again:
 	list_for_each_entry(dev, &card->devices, list) {
-		if (dev->type >= range_low && dev->type <= range_high) {
+		type = (__force unsigned int)dev->type;
+		if (type >= range_low && type <= range_high) {
 			if ((err = snd_device_free(card, dev->device_data)) < 0)
 				return err;
 			goto __again;

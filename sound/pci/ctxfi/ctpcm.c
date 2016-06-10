@@ -129,8 +129,6 @@ static int ct_pcm_playback_open(struct snd_pcm_substream *substream)
 
 	apcm->substream = substream;
 	apcm->interrupt = ct_atc_pcm_interrupt;
-	runtime->private_data = apcm;
-	runtime->private_free = ct_atc_pcm_free_substream;
 	if (IEC958 == substream->pcm->device) {
 		runtime->hw = ct_spdif_passthru_playback_hw;
 		atc->spdif_out_passthru(atc, 1);
@@ -155,8 +153,12 @@ static int ct_pcm_playback_open(struct snd_pcm_substream *substream)
 	}
 
 	apcm->timer = ct_timer_instance_new(atc->timer, apcm);
-	if (!apcm->timer)
+	if (!apcm->timer) {
+		kfree(apcm);
 		return -ENOMEM;
+	}
+	runtime->private_data = apcm;
+	runtime->private_free = ct_atc_pcm_free_substream;
 
 	return 0;
 }
@@ -278,8 +280,6 @@ static int ct_pcm_capture_open(struct snd_pcm_substream *substream)
 	apcm->started = 0;
 	apcm->substream = substream;
 	apcm->interrupt = ct_atc_pcm_interrupt;
-	runtime->private_data = apcm;
-	runtime->private_free = ct_atc_pcm_free_substream;
 	runtime->hw = ct_pcm_capture_hw;
 	runtime->hw.rate_max = atc->rsr * atc->msr;
 
@@ -298,8 +298,12 @@ static int ct_pcm_capture_open(struct snd_pcm_substream *substream)
 	}
 
 	apcm->timer = ct_timer_instance_new(atc->timer, apcm);
-	if (!apcm->timer)
+	if (!apcm->timer) {
+		kfree(apcm);
 		return -ENOMEM;
+	}
+	runtime->private_data = apcm;
+	runtime->private_free = ct_atc_pcm_free_substream;
 
 	return 0;
 }
@@ -391,16 +395,42 @@ static struct snd_pcm_ops ct_pcm_capture_ops = {
 	.page		= snd_pcm_sgbuf_ops_page,
 };
 
+static const struct snd_pcm_chmap_elem surround_map[] = {
+	{ .channels = 1,
+	  .map = { SNDRV_CHMAP_MONO } },
+	{ .channels = 2,
+	  .map = { SNDRV_CHMAP_RL, SNDRV_CHMAP_RR } },
+	{ }
+};
+
+static const struct snd_pcm_chmap_elem clfe_map[] = {
+	{ .channels = 1,
+	  .map = { SNDRV_CHMAP_MONO } },
+	{ .channels = 2,
+	  .map = { SNDRV_CHMAP_FC, SNDRV_CHMAP_LFE } },
+	{ }
+};
+
+static const struct snd_pcm_chmap_elem side_map[] = {
+	{ .channels = 1,
+	  .map = { SNDRV_CHMAP_MONO } },
+	{ .channels = 2,
+	  .map = { SNDRV_CHMAP_SL, SNDRV_CHMAP_SR } },
+	{ }
+};
+
 /* Create ALSA pcm device */
 int ct_alsa_pcm_create(struct ct_atc *atc,
 		       enum CTALSADEVS device,
 		       const char *device_name)
 {
 	struct snd_pcm *pcm;
+	const struct snd_pcm_chmap_elem *map;
+	int chs;
 	int err;
 	int playback_count, capture_count;
 
-	playback_count = (IEC958 == device) ? 1 : 8;
+	playback_count = (IEC958 == device) ? 1 : 256;
 	capture_count = (FRONT == device) ? 1 : 0;
 	err = snd_pcm_new(atc->card, "ctxfi", device,
 			  playback_count, capture_count, &pcm);
@@ -423,7 +453,31 @@ int ct_alsa_pcm_create(struct ct_atc *atc,
 	snd_pcm_lib_preallocate_pages_for_all(pcm, SNDRV_DMA_TYPE_DEV_SG,
 			snd_dma_pci_data(atc->pci), 128*1024, 128*1024);
 
-#ifdef CONFIG_PM
+	chs = 2;
+	switch (device) {
+	case FRONT:
+		chs = 8;
+		map = snd_pcm_std_chmaps;
+		break;
+	case SURROUND:
+		map = surround_map;
+		break;
+	case CLFE:
+		map = clfe_map;
+		break;
+	case SIDE:
+		map = side_map;
+		break;
+	default:
+		map = snd_pcm_std_chmaps;
+		break;
+	}
+	err = snd_pcm_add_chmap_ctls(pcm, SNDRV_PCM_STREAM_PLAYBACK, map, chs,
+				     0, NULL);
+	if (err < 0)
+		return err;
+
+#ifdef CONFIG_PM_SLEEP
 	atc->pcms[device] = pcm;
 #endif
 

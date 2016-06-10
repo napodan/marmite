@@ -42,7 +42,7 @@
  *  0.0.18
  *    Add support for mute control on SB Live 24bit (cards w/ SPI DAC)
  *
- *  This code was initally based on code from ALSA's emu10k1x.c which is:
+ *  This code was initially based on code from ALSA's emu10k1x.c which is:
  *  Copyright (c) by Francisco Moraes <fmoraes@nc.rr.com>
  *
  *   This program is free software; you can redistribute it and/or modify
@@ -325,7 +325,7 @@ static int snd_ca0106_capture_mic_line_in_put(struct snd_kcontrol *kcontrol,
         return change;
 }
 
-static struct snd_kcontrol_new snd_ca0106_capture_mic_line_in __devinitdata =
+static struct snd_kcontrol_new snd_ca0106_capture_mic_line_in =
 {
 	.iface =	SNDRV_CTL_ELEM_IFACE_MIXER,
 	.name =		"Shared Mic/Line in Capture Switch",
@@ -334,7 +334,7 @@ static struct snd_kcontrol_new snd_ca0106_capture_mic_line_in __devinitdata =
 	.put =		snd_ca0106_capture_mic_line_in_put
 };
 
-static struct snd_kcontrol_new snd_ca0106_capture_line_in_side_out __devinitdata =
+static struct snd_kcontrol_new snd_ca0106_capture_line_in_side_out =
 {
 	.iface =	SNDRV_CTL_ELEM_IFACE_MIXER,
 	.name =		"Shared Line in/Side out Capture Switch",
@@ -588,7 +588,7 @@ static int spi_mute_put(struct snd_kcontrol *kcontrol,
 	.private_value = ((chid) << 8) | (reg)			\
 }
 
-static struct snd_kcontrol_new snd_ca0106_volume_ctls[] __devinitdata = {
+static struct snd_kcontrol_new snd_ca0106_volume_ctls[] = {
 	CA_VOLUME("Analog Front Playback Volume",
 		  CONTROL_FRONT_CHANNEL, PLAYBACK_VOLUME2),
         CA_VOLUME("Analog Rear Playback Volume",
@@ -669,36 +669,73 @@ static struct snd_kcontrol_new snd_ca0106_volume_ctls[] __devinitdata = {
 	.private_value = chid					\
 }
 
-static struct snd_kcontrol_new snd_ca0106_volume_i2c_adc_ctls[] __devinitdata = {
+static struct snd_kcontrol_new snd_ca0106_volume_i2c_adc_ctls[] = {
         I2C_VOLUME("Phone Capture Volume", 0),
         I2C_VOLUME("Mic Capture Volume", 1),
         I2C_VOLUME("Line in Capture Volume", 2),
         I2C_VOLUME("Aux Capture Volume", 3),
 };
 
-#define SPI_SWITCH(xname,reg,bit) \
-{								\
-	.iface	= SNDRV_CTL_ELEM_IFACE_MIXER, .name = xname,	\
-	.access = SNDRV_CTL_ELEM_ACCESS_READWRITE,		\
-	.info	= spi_mute_info,				\
-	.get	= spi_mute_get,					\
-	.put	= spi_mute_put,					\
-	.private_value = (reg<<SPI_REG_SHIFT) | (bit)		\
-}
-
-static struct snd_kcontrol_new snd_ca0106_volume_spi_dac_ctls[]
-__devinitdata = {
-	SPI_SWITCH("Analog Front Playback Switch",
-		   SPI_DMUTE4_REG, SPI_DMUTE4_BIT),
-	SPI_SWITCH("Analog Rear Playback Switch",
-		   SPI_DMUTE0_REG, SPI_DMUTE0_BIT),
-	SPI_SWITCH("Analog Center/LFE Playback Switch",
-		   SPI_DMUTE2_REG, SPI_DMUTE2_BIT),
-	SPI_SWITCH("Analog Side Playback Switch",
-		   SPI_DMUTE1_REG, SPI_DMUTE1_BIT),
+static const int spi_dmute_reg[] = {
+	SPI_DMUTE0_REG,
+	SPI_DMUTE1_REG,
+	SPI_DMUTE2_REG,
+	0,
+	SPI_DMUTE4_REG,
+};
+static const int spi_dmute_bit[] = {
+	SPI_DMUTE0_BIT,
+	SPI_DMUTE1_BIT,
+	SPI_DMUTE2_BIT,
+	0,
+	SPI_DMUTE4_BIT,
 };
 
-static int __devinit remove_ctl(struct snd_card *card, const char *name)
+static struct snd_kcontrol_new
+snd_ca0106_volume_spi_dac_ctl(struct snd_ca0106_details *details,
+			      int channel_id)
+{
+	struct snd_kcontrol_new spi_switch = {0};
+	int reg, bit;
+	int dac_id;
+
+	spi_switch.iface = SNDRV_CTL_ELEM_IFACE_MIXER;
+	spi_switch.access = SNDRV_CTL_ELEM_ACCESS_READWRITE;
+	spi_switch.info = spi_mute_info;
+	spi_switch.get = spi_mute_get;
+	spi_switch.put = spi_mute_put;
+
+	switch (channel_id) {
+	case PCM_FRONT_CHANNEL:
+		spi_switch.name = "Analog Front Playback Switch";
+		dac_id = (details->spi_dac & 0xf000) >> (4 * 3);
+		break;
+	case PCM_REAR_CHANNEL:
+		spi_switch.name = "Analog Rear Playback Switch";
+		dac_id = (details->spi_dac & 0x0f00) >> (4 * 2);
+		break;
+	case PCM_CENTER_LFE_CHANNEL:
+		spi_switch.name = "Analog Center/LFE Playback Switch";
+		dac_id = (details->spi_dac & 0x00f0) >> (4 * 1);
+		break;
+	case PCM_UNKNOWN_CHANNEL:
+		spi_switch.name = "Analog Side Playback Switch";
+		dac_id = (details->spi_dac & 0x000f) >> (4 * 0);
+		break;
+	default:
+		/* Unused channel */
+		spi_switch.name = NULL;
+		dac_id = 0;
+	}
+	reg = spi_dmute_reg[dac_id];
+	bit = spi_dmute_bit[dac_id];
+
+	spi_switch.private_value = (reg << SPI_REG_SHIFT) | bit;
+
+	return spi_switch;
+}
+
+static int remove_ctl(struct snd_card *card, const char *name)
 {
 	struct snd_ctl_elem_id id;
 	memset(&id, 0, sizeof(id));
@@ -707,7 +744,7 @@ static int __devinit remove_ctl(struct snd_card *card, const char *name)
 	return snd_ctl_remove_id(card, &id);
 }
 
-static struct snd_kcontrol __devinit *ctl_find(struct snd_card *card, const char *name)
+static struct snd_kcontrol *ctl_find(struct snd_card *card, const char *name)
 {
 	struct snd_ctl_elem_id sid;
 	memset(&sid, 0, sizeof(sid));
@@ -717,7 +754,7 @@ static struct snd_kcontrol __devinit *ctl_find(struct snd_card *card, const char
 	return snd_ctl_find_id(card, &sid);
 }
 
-static int __devinit rename_ctl(struct snd_card *card, const char *src, const char *dst)
+static int rename_ctl(struct snd_card *card, const char *src, const char *dst)
 {
 	struct snd_kcontrol *kctl = ctl_find(card, src);
 	if (kctl) {
@@ -737,10 +774,10 @@ static int __devinit rename_ctl(struct snd_card *card, const char *src, const ch
 		}							\
 	} while (0)
 
-static __devinitdata
+static
 DECLARE_TLV_DB_SCALE(snd_ca0106_master_db_scale, -6375, 25, 1);
 
-static char *slave_vols[] __devinitdata = {
+static char *slave_vols[] = {
 	"Analog Front Playback Volume",
         "Analog Rear Playback Volume",
 	"Analog Center/LFE Playback Volume",
@@ -753,7 +790,7 @@ static char *slave_vols[] __devinitdata = {
 	NULL
 };
 
-static char *slave_sws[] __devinitdata = {
+static char *slave_sws[] = {
 	"Analog Front Playback Switch",
 	"Analog Rear Playback Switch",
 	"Analog Center/LFE Playback Switch",
@@ -762,7 +799,7 @@ static char *slave_sws[] __devinitdata = {
 	NULL
 };
 
-static void __devinit add_slaves(struct snd_card *card,
+static void add_slaves(struct snd_card *card,
 				 struct snd_kcontrol *master, char **list)
 {
 	for (; *list; list++) {
@@ -772,7 +809,7 @@ static void __devinit add_slaves(struct snd_card *card,
 	}
 }
 
-int __devinit snd_ca0106_mixer(struct snd_ca0106 *emu)
+int snd_ca0106_mixer(struct snd_ca0106 *emu)
 {
 	int err;
         struct snd_card *card = emu->card;
@@ -832,8 +869,18 @@ int __devinit snd_ca0106_mixer(struct snd_ca0106 *emu)
 		if (err < 0)
 			return err;
 	}
-	if (emu->details->spi_dac == 1)
-		ADD_CTLS(emu, snd_ca0106_volume_spi_dac_ctls);
+	if (emu->details->spi_dac) {
+		int i;
+		for (i = 0;; i++) {
+			struct snd_kcontrol_new ctl;
+			ctl = snd_ca0106_volume_spi_dac_ctl(emu->details, i);
+			if (!ctl.name)
+				break;
+			err = snd_ctl_add(card, snd_ctl_new1(&ctl, emu));
+			if (err < 0)
+				return err;
+		}
+	}
 
 	/* Create virtual master controls */
 	vmaster = snd_ctl_make_virtual_master("Master Playback Volume",
@@ -845,7 +892,7 @@ int __devinit snd_ca0106_mixer(struct snd_ca0106 *emu)
 		return err;
 	add_slaves(card, vmaster, slave_vols);
 
-	if (emu->details->spi_dac == 1) {
+	if (emu->details->spi_dac) {
 		vmaster = snd_ctl_make_virtual_master("Master Playback Switch",
 						      NULL);
 		if (!vmaster)
@@ -860,7 +907,7 @@ int __devinit snd_ca0106_mixer(struct snd_ca0106 *emu)
         return 0;
 }
 
-#ifdef CONFIG_PM
+#ifdef CONFIG_PM_SLEEP
 struct ca0106_vol_tbl {
 	unsigned int channel_id;
 	unsigned int reg;
@@ -906,4 +953,4 @@ void snd_ca0106_mixer_resume(struct snd_ca0106  *chip)
 	if (chip->details->i2c_adc)
 		ca0106_set_capture_mic_line_in(chip);
 }
-#endif /* CONFIG_PM */
+#endif /* CONFIG_PM_SLEEP */

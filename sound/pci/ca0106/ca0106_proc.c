@@ -42,7 +42,7 @@
  *  0.0.18
  *    Implement support for Line-in capture on SB Live 24bit.
  *
- *  This code was initally based on code from ALSA's emu10k1x.c which is:
+ *  This code was initially based on code from ALSA's emu10k1x.c which is:
  *  Copyright (c) by Francisco Moraes <fmoraes@nc.rr.com>
  *
  *   This program is free software; you can redistribute it and/or modify
@@ -424,7 +424,7 @@ static void snd_ca0106_proc_i2c_write(struct snd_info_entry *entry,
         }
 }
 
-int __devinit snd_ca0106_proc_init(struct snd_ca0106 * emu)
+int snd_ca0106_proc_init(struct snd_ca0106 *emu)
 {
 	struct snd_info_entry *entry;
 	

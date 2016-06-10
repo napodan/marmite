@@ -94,7 +94,8 @@ static int __init davinci_vc_probe(struct platform_device *pdev)
 	res = platform_get_resource(pdev, IORESOURCE_DMA, 0);
 	if (!res) {
 		dev_err(&pdev->dev, "no DMA resource\n");
-		return -ENXIO;
+		ret = -ENXIO;
+		goto fail4;
 	}
 
 	davinci_vc->davinci_vcif.dma_tx_channel = res->start;
@@ -104,7 +105,8 @@ static int __init davinci_vc_probe(struct platform_device *pdev)
 	res = platform_get_resource(pdev, IORESOURCE_DMA, 1);
 	if (!res) {
 		dev_err(&pdev->dev, "no DMA resource\n");
-		return -ENXIO;
+		ret = -ENXIO;
+		goto fail4;
 	}
 
 	davinci_vc->davinci_vcif.dma_rx_channel = res->start;
@@ -116,16 +118,18 @@ static int __init davinci_vc_probe(struct platform_device *pdev)
 
 	/* Voice codec interface client */
 	cell = &davinci_vc->cells[DAVINCI_VC_VCIF_CELL];
-	cell->name = "davinci_vcif";
-	cell->driver_data = davinci_vc;
+	cell->name = "davinci-vcif";
+	cell->platform_data = davinci_vc;
+	cell->pdata_size = sizeof(*davinci_vc);
 
 	/* Voice codec CQ93VC client */
 	cell = &davinci_vc->cells[DAVINCI_VC_CQ93VC_CELL];
-	cell->name = "cq93vc";
-	cell->driver_data = davinci_vc;
+	cell->name = "cq93vc-codec";
+	cell->platform_data = davinci_vc;
+	cell->pdata_size = sizeof(*davinci_vc);
 
 	ret = mfd_add_devices(&pdev->dev, pdev->id, davinci_vc->cells,
-			      DAVINCI_VC_CELLS, NULL, 0);
+			      DAVINCI_VC_CELLS, NULL, 0, NULL);
 	if (ret != 0) {
 		dev_err(&pdev->dev, "fail to register client devices\n");
 		goto fail4;
@@ -147,7 +151,7 @@ fail1:
 	return ret;
 }
 
-static int __devexit davinci_vc_remove(struct platform_device *pdev)
+static int davinci_vc_remove(struct platform_device *pdev)
 {
 	struct davinci_vc *davinci_vc = platform_get_drvdata(pdev);
 
@@ -170,20 +174,10 @@ static struct platform_driver davinci_vc_driver = {
 		.name = "davinci_voicecodec",
 		.owner = THIS_MODULE,
 	},
-	.remove	= __devexit_p(davinci_vc_remove),
+	.remove	= davinci_vc_remove,
 };
 
-static int __init davinci_vc_init(void)
-{
-	return platform_driver_probe(&davinci_vc_driver, davinci_vc_probe);
-}
-module_init(davinci_vc_init);
-
-static void __exit davinci_vc_exit(void)
-{
-	platform_driver_unregister(&davinci_vc_driver);
-}
-module_exit(davinci_vc_exit);
+module_platform_driver_probe(davinci_vc_driver, davinci_vc_probe);
 
 MODULE_AUTHOR("Miguel Aguilar");
 MODULE_DESCRIPTION("Texas Instruments DaVinci Voice Codec Core Interface");

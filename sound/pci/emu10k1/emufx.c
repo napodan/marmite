@@ -303,6 +303,9 @@ static const u32 db_table[101] = {
 static const DECLARE_TLV_DB_SCALE(snd_emu10k1_db_scale1, -4000, 40, 1);
 static const DECLARE_TLV_DB_LINEAR(snd_emu10k1_db_linear, TLV_DB_GAIN_MUTE, 0);
 
+/* EMU10K1 bass/treble db gain */
+static const DECLARE_TLV_DB_SCALE(snd_emu10k1_bass_treble_db_scale, -1200, 60, 0);
+
 static const u32 onoff_table[2] = {
 	0x00000000, 0x00000001
 };
@@ -1070,7 +1073,7 @@ static int snd_emu10k1_ipcm_peek(struct snd_emu10k1 *emu,
 #define SND_EMU10K1_PLAYBACK_CHANNELS	8
 #define SND_EMU10K1_CAPTURE_CHANNELS	4
 
-static void __devinit
+static void
 snd_emu10k1_init_mono_control(struct snd_emu10k1_fx8010_control_gpr *ctl,
 			      const char *name, int gpr, int defval)
 {
@@ -1091,7 +1094,7 @@ snd_emu10k1_init_mono_control(struct snd_emu10k1_fx8010_control_gpr *ctl,
 	}
 }
 
-static void __devinit
+static void
 snd_emu10k1_init_stereo_control(struct snd_emu10k1_fx8010_control_gpr *ctl,
 				const char *name, int gpr, int defval)
 {
@@ -1113,7 +1116,7 @@ snd_emu10k1_init_stereo_control(struct snd_emu10k1_fx8010_control_gpr *ctl,
 	}
 }
 
-static void __devinit
+static void
 snd_emu10k1_init_mono_onoff_control(struct snd_emu10k1_fx8010_control_gpr *ctl,
 				    const char *name, int gpr, int defval)
 {
@@ -1126,7 +1129,7 @@ snd_emu10k1_init_mono_onoff_control(struct snd_emu10k1_fx8010_control_gpr *ctl,
 	ctl->translation = EMU10K1_GPR_TRANSLATION_ONOFF;
 }
 
-static void __devinit
+static void
 snd_emu10k1_init_stereo_onoff_control(struct snd_emu10k1_fx8010_control_gpr *ctl,
 				      const char *name, int gpr, int defval)
 {
@@ -1165,7 +1168,7 @@ static int snd_emu10k1_audigy_dsp_convert_32_to_2x16(
  * initial DSP configuration for Audigy
  */
 
-static int __devinit _snd_emu10k1_audigy_init_efx(struct snd_emu10k1 *emu)
+static int _snd_emu10k1_audigy_init_efx(struct snd_emu10k1 *emu)
 {
 	int err, i, z, gpr, nctl;
 	int bit_shifter16;
@@ -1754,14 +1757,14 @@ A_OP(icode, &ptr, iMAC0, A_GPR(var), A_GPR(var), A_GPR(vol), A_EXTIN(input))
 
 /* when volume = max, then copy only to avoid volume modification */
 /* with iMAC0 (negative values) */
-static void __devinit _volume(struct snd_emu10k1_fx8010_code *icode, u32 *ptr, u32 dst, u32 src, u32 vol)
+static void _volume(struct snd_emu10k1_fx8010_code *icode, u32 *ptr, u32 dst, u32 src, u32 vol)
 {
 	OP(icode, ptr, iMAC0, dst, C_00000000, src, vol);
 	OP(icode, ptr, iANDXOR, C_00000000, vol, C_ffffffff, C_7fffffff);
 	OP(icode, ptr, iSKIP, GPR_COND, GPR_COND, CC_REG_NONZERO, C_00000001);
 	OP(icode, ptr, iACC3, dst, src, C_00000000, C_00000000);
 }
-static void __devinit _volume_add(struct snd_emu10k1_fx8010_code *icode, u32 *ptr, u32 dst, u32 src, u32 vol)
+static void _volume_add(struct snd_emu10k1_fx8010_code *icode, u32 *ptr, u32 dst, u32 src, u32 vol)
 {
 	OP(icode, ptr, iANDXOR, C_00000000, vol, C_ffffffff, C_7fffffff);
 	OP(icode, ptr, iSKIP, GPR_COND, GPR_COND, CC_REG_NONZERO, C_00000002);
@@ -1769,7 +1772,7 @@ static void __devinit _volume_add(struct snd_emu10k1_fx8010_code *icode, u32 *pt
 	OP(icode, ptr, iSKIP, C_00000000, C_7fffffff, C_7fffffff, C_00000001);
 	OP(icode, ptr, iMAC0, dst, dst, src, vol);
 }
-static void __devinit _volume_out(struct snd_emu10k1_fx8010_code *icode, u32 *ptr, u32 dst, u32 src, u32 vol)
+static void _volume_out(struct snd_emu10k1_fx8010_code *icode, u32 *ptr, u32 dst, u32 src, u32 vol)
 {
 	OP(icode, ptr, iANDXOR, C_00000000, vol, C_ffffffff, C_7fffffff);
 	OP(icode, ptr, iSKIP, GPR_COND, GPR_COND, CC_REG_NONZERO, C_00000002);
@@ -1800,7 +1803,7 @@ static void __devinit _volume_out(struct snd_emu10k1_fx8010_code *icode, u32 *pt
 		_SWITCH_NEG(icode, ptr, GPR(dst), GPR(src))
 
 
-static int __devinit _snd_emu10k1_init_efx(struct snd_emu10k1 *emu)
+static int _snd_emu10k1_init_efx(struct snd_emu10k1 *emu)
 {
 	int err, i, z, gpr, tmp, playback, capture;
 	u32 ptr;
@@ -2163,6 +2166,7 @@ static int __devinit _snd_emu10k1_init_efx(struct snd_emu10k1 *emu)
 	ctl->min = 0;
 	ctl->max = 40;
 	ctl->value[0] = ctl->value[1] = 20;
+	ctl->tlv = snd_emu10k1_bass_treble_db_scale;
 	ctl->translation = EMU10K1_GPR_TRANSLATION_BASS;
 	ctl = &controls[i + 1];
 	ctl->id.iface = SNDRV_CTL_ELEM_IFACE_MIXER;
@@ -2172,6 +2176,7 @@ static int __devinit _snd_emu10k1_init_efx(struct snd_emu10k1 *emu)
 	ctl->min = 0;
 	ctl->max = 40;
 	ctl->value[0] = ctl->value[1] = 20;
+	ctl->tlv = snd_emu10k1_bass_treble_db_scale;
 	ctl->translation = EMU10K1_GPR_TRANSLATION_TREBLE;
 
 #define BASS_GPR	0x8c
@@ -2368,7 +2373,7 @@ static int __devinit _snd_emu10k1_init_efx(struct snd_emu10k1 *emu)
 	return err;
 }
 
-int __devinit snd_emu10k1_init_efx(struct snd_emu10k1 *emu)
+int snd_emu10k1_init_efx(struct snd_emu10k1 *emu)
 {
 	spin_lock_init(&emu->fx8010.irq_lock);
 	INIT_LIST_HEAD(&emu->fx8010.gpr_ctl);
@@ -2621,7 +2626,8 @@ static int snd_emu10k1_fx8010_release(struct snd_hwdep * hw, struct file *file)
 	return 0;
 }
 
-int __devinit snd_emu10k1_fx8010_new(struct snd_emu10k1 *emu, int device, struct snd_hwdep ** rhwdep)
+int snd_emu10k1_fx8010_new(struct snd_emu10k1 *emu, int device,
+			   struct snd_hwdep **rhwdep)
 {
 	struct snd_hwdep *hw;
 	int err;
@@ -2641,8 +2647,8 @@ int __devinit snd_emu10k1_fx8010_new(struct snd_emu10k1 *emu, int device, struct
 	return 0;
 }
 
-#ifdef CONFIG_PM
-int __devinit snd_emu10k1_efx_alloc_pm_buffer(struct snd_emu10k1 *emu)
+#ifdef CONFIG_PM_SLEEP
+int snd_emu10k1_efx_alloc_pm_buffer(struct snd_emu10k1 *emu)
 {
 	int len;
 

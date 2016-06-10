@@ -42,7 +42,6 @@
 #include <linux/spinlock.h>
 #include <linux/bitops.h>
 
-#include <asm/system.h>
 
 #include "sound_config.h"
 #include "waveartist.h"
@@ -184,14 +183,8 @@ waveartist_iack(wavnc_info *devc)
 static inline int
 waveartist_sleep(int timeout_ms)
 {
-	unsigned int timeout = timeout_ms * 10 * HZ / 100;
-
-	do {
-		set_current_state(TASK_INTERRUPTIBLE);
-		timeout = schedule_timeout(timeout);
-	} while (timeout);
-
-	return 0;
+	unsigned int timeout = msecs_to_jiffies(timeout_ms*100);
+	return schedule_timeout_interruptible(timeout);
 }
 
 static int
@@ -1489,9 +1482,9 @@ vnc_mute_spkr(wavnc_info *devc)
 {
 	unsigned long flags;
 
-	spin_lock_irqsave(&nw_gpio_lock, flags);
+	raw_spin_lock_irqsave(&nw_gpio_lock, flags);
 	nw_cpld_modify(CPLD_UNMUTE, devc->spkr_mute_state ? 0 : CPLD_UNMUTE);
-	spin_unlock_irqrestore(&nw_gpio_lock, flags);
+	raw_spin_unlock_irqrestore(&nw_gpio_lock, flags);
 }
 
 static void

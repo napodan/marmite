@@ -18,6 +18,7 @@
 #include <linux/interrupt.h>
 #include <linux/delay.h>
 #include <linux/platform_device.h>
+#include <linux/slab.h>
 #include <linux/mfd/core.h>
 
 #include <linux/mfd/janz.h>
@@ -32,7 +33,7 @@
 
 /* Module Parameters */
 static unsigned int num_modules = CMODIO_MAX_MODULES;
-static unsigned char *modules[CMODIO_MAX_MODULES] = {
+static char *modules[CMODIO_MAX_MODULES] = {
 	"empty", "empty", "empty", "empty",
 };
 
@@ -62,7 +63,7 @@ struct cmodio_device {
  * Subdevices using the mfd-core API
  */
 
-static int __devinit cmodio_setup_subdevice(struct cmodio_device *priv,
+static int cmodio_setup_subdevice(struct cmodio_device *priv,
 					    char *name, unsigned int devno,
 					    unsigned int modno)
 {
@@ -86,7 +87,7 @@ static int __devinit cmodio_setup_subdevice(struct cmodio_device *priv,
 	/* Add platform data */
 	pdata->modno = modno;
 	cell->platform_data = pdata;
-	cell->data_size = sizeof(*pdata);
+	cell->pdata_size = sizeof(*pdata);
 
 	/* MODULbus registers -- PCI BAR3 is big-endian MODULbus access */
 	res->flags = IORESOURCE_MEM;
@@ -119,7 +120,7 @@ static int __devinit cmodio_setup_subdevice(struct cmodio_device *priv,
 }
 
 /* Probe each submodule using kernel parameters */
-static int __devinit cmodio_probe_submodules(struct cmodio_device *priv)
+static int cmodio_probe_submodules(struct cmodio_device *priv)
 {
 	struct pci_dev *pdev = priv->pdev;
 	unsigned int num_probed = 0;
@@ -146,7 +147,7 @@ static int __devinit cmodio_probe_submodules(struct cmodio_device *priv)
 	}
 
 	return mfd_add_devices(&pdev->dev, 0, priv->cells,
-			       num_probed, NULL, pdev->irq);
+			       num_probed, NULL, pdev->irq, NULL);
 }
 
 /*
@@ -176,7 +177,7 @@ static const struct attribute_group cmodio_sysfs_attr_group = {
  * PCI Driver
  */
 
-static int __devinit cmodio_pci_probe(struct pci_dev *dev,
+static int cmodio_pci_probe(struct pci_dev *dev,
 				      const struct pci_device_id *id)
 {
 	struct cmodio_device *priv;
@@ -253,7 +254,7 @@ out_return:
 	return ret;
 }
 
-static void __devexit cmodio_pci_remove(struct pci_dev *dev)
+static void cmodio_pci_remove(struct pci_dev *dev)
 {
 	struct cmodio_device *priv = pci_get_drvdata(dev);
 
@@ -279,26 +280,11 @@ static struct pci_driver cmodio_pci_driver = {
 	.name     = DRV_NAME,
 	.id_table = cmodio_pci_ids,
 	.probe    = cmodio_pci_probe,
-	.remove   = __devexit_p(cmodio_pci_remove),
+	.remove   = cmodio_pci_remove,
 };
 
-/*
- * Module Init / Exit
- */
-
-static int __init cmodio_init(void)
-{
-	return pci_register_driver(&cmodio_pci_driver);
-}
-
-static void __exit cmodio_exit(void)
-{
-	pci_unregister_driver(&cmodio_pci_driver);
-}
+module_pci_driver(cmodio_pci_driver);
 
 MODULE_AUTHOR("Ira W. Snyder <iws@ovro.caltech.edu>");
 MODULE_DESCRIPTION("Janz CMOD-IO PCI MODULbus Carrier Board Driver");
 MODULE_LICENSE("GPL");
-
-module_init(cmodio_init);
-module_exit(cmodio_exit);

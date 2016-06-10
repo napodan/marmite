@@ -702,7 +702,7 @@ static struct snd_pcm_ops snd_pmac_capture_ops = {
 	.pointer =	snd_pmac_capture_pointer,
 };
 
-int __devinit snd_pmac_pcm_new(struct snd_pmac *chip)
+int snd_pmac_pcm_new(struct snd_pmac *chip)
 {
 	struct snd_pcm *pcm;
 	int err;
@@ -881,8 +881,7 @@ static int snd_pmac_free(struct snd_pmac *chip)
 		for (i = 0; i < 3; i++) {
 			if (chip->requested & (1 << i))
 				release_mem_region(chip->rsrc[i].start,
-						   chip->rsrc[i].end -
-						   chip->rsrc[i].start + 1);
+						   resource_size(&chip->rsrc[i]));
 		}
 	}
 
@@ -908,7 +907,7 @@ static int snd_pmac_dev_free(struct snd_device *device)
  * check the machine support byteswap (little-endian)
  */
 
-static void __devinit detect_byte_swap(struct snd_pmac *chip)
+static void detect_byte_swap(struct snd_pmac *chip)
 {
 	struct device_node *mio;
 
@@ -934,7 +933,7 @@ static void __devinit detect_byte_swap(struct snd_pmac *chip)
 /*
  * detect a sound chip
  */
-static int __devinit snd_pmac_detect(struct snd_pmac *chip)
+static int snd_pmac_detect(struct snd_pmac *chip)
 {
 	struct device_node *sound;
 	struct device_node *dn;
@@ -1034,7 +1033,11 @@ static int __devinit snd_pmac_detect(struct snd_pmac *chip)
 	if (of_device_is_compatible(sound, "tumbler")) {
 		chip->model = PMAC_TUMBLER;
 		chip->can_capture = of_machine_is_compatible("PowerMac4,2")
-				|| of_machine_is_compatible("PowerBook4,1");
+				|| of_machine_is_compatible("PowerBook3,2")
+				|| of_machine_is_compatible("PowerBook3,3")
+				|| of_machine_is_compatible("PowerBook4,1")
+				|| of_machine_is_compatible("PowerBook4,2")
+				|| of_machine_is_compatible("PowerBook4,3");
 		chip->can_duplex = 0;
 		// chip->can_byte_swap = 0; /* FIXME: check this */
 		chip->num_freqs = ARRAY_SIZE(tumbler_freqs);
@@ -1143,7 +1146,7 @@ static int pmac_hp_detect_get(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-static struct snd_kcontrol_new auto_mute_controls[] __devinitdata = {
+static struct snd_kcontrol_new auto_mute_controls[] = {
 	{ .iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 	  .name = "Auto Mute Switch",
 	  .info = snd_pmac_boolean_mono_info,
@@ -1158,7 +1161,7 @@ static struct snd_kcontrol_new auto_mute_controls[] __devinitdata = {
 	},
 };
 
-int __devinit snd_pmac_add_automute(struct snd_pmac *chip)
+int snd_pmac_add_automute(struct snd_pmac *chip)
 {
 	int err;
 	chip->auto_mute = 1;
@@ -1175,7 +1178,7 @@ int __devinit snd_pmac_add_automute(struct snd_pmac *chip)
 /*
  * create and detect a pmac chip record
  */
-int __devinit snd_pmac_new(struct snd_card *card, struct snd_pmac **chip_return)
+int snd_pmac_new(struct snd_card *card, struct snd_pmac **chip_return)
 {
 	struct snd_pmac *chip;
 	struct device_node *np;
@@ -1224,14 +1227,11 @@ int __devinit snd_pmac_new(struct snd_card *card, struct snd_pmac **chip_return)
 				goto __error;
 			}
 			if (request_mem_region(chip->rsrc[i].start,
-					       chip->rsrc[i].end -
-					       chip->rsrc[i].start + 1,
+					       resource_size(&chip->rsrc[i]),
 					       rnames[i]) == NULL) {
 				printk(KERN_ERR "snd: can't request rsrc "
-				       " %d (%s: 0x%016llx:%016llx)\n",
-				       i, rnames[i],
-				       (unsigned long long)chip->rsrc[i].start,
-				       (unsigned long long)chip->rsrc[i].end);
+				       " %d (%s: %pR)\n",
+				       i, rnames[i], &chip->rsrc[i]);
 				err = -ENODEV;
 				goto __error;
 			}
@@ -1252,14 +1252,11 @@ int __devinit snd_pmac_new(struct snd_card *card, struct snd_pmac **chip_return)
 				goto __error;
 			}
 			if (request_mem_region(chip->rsrc[i].start,
-					       chip->rsrc[i].end -
-					       chip->rsrc[i].start + 1,
+					       resource_size(&chip->rsrc[i]),
 					       rnames[i]) == NULL) {
 				printk(KERN_ERR "snd: can't request rsrc "
-				       " %d (%s: 0x%016llx:%016llx)\n",
-				       i, rnames[i],
-				       (unsigned long long)chip->rsrc[i].start,
-				       (unsigned long long)chip->rsrc[i].end);
+				       " %d (%s: %pR)\n",
+				       i, rnames[i], &chip->rsrc[i]);
 				err = -ENODEV;
 				goto __error;
 			}

@@ -1,22 +1,29 @@
 /*
- * linux/kernel/workqueue.c
+ * kernel/workqueue.c - generic async execution with shared worker pool
  *
- * Generic mechanism for defining kernel helper threads for running
- * arbitrary tasks in process context.
+ * Copyright (C) 2002		Ingo Molnar
  *
- * Started by Ingo Molnar, Copyright (C) 2002
- *
- * Derived from the taskqueue/keventd code by:
- *
- *   David Woodhouse <dwmw2@infradead.org>
- *   Andrew Morton
- *   Kai Petzke <wpp@marie.physik.tu-berlin.de>
- *   Theodore Ts'o <tytso@mit.edu>
+ *   Derived from the taskqueue/keventd code by:
+ *     David Woodhouse <dwmw2@infradead.org>
+ *     Andrew Morton
+ *     Kai Petzke <wpp@marie.physik.tu-berlin.de>
+ *     Theodore Ts'o <tytso@mit.edu>
  *
  * Made to use alloc_percpu by Christoph Lameter.
+ *
+ * Copyright (C) 2010		SUSE Linux Products GmbH
+ * Copyright (C) 2010		Tejun Heo <tj@kernel.org>
+ *
+ * This is the generic async execution mechanism.  Work items as are
+ * executed in process context.  The worker pool is shared and
+ * automatically managed.  There is one worker pool for each CPU and
+ * one extra for works which are better served by workers which are
+ * not bound to any specific CPU.
+ *
+ * Please read Documentation/workqueue.txt for details.
  */
 
-#include <linux/module.h>
+#include <linux/export.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/init.h>
@@ -33,8 +40,185 @@
 #include <linux/kallsyms.h>
 #include <linux/debug_locks.h>
 #include <linux/lockdep.h>
+#include <linux/idr.h>
+#include <linux/hashtable.h>
 #define CREATE_TRACE_POINTS
 #include <trace/events/workqueue.h>
+#include "workqueue_internal.h"
+
+enum {
+	/*
+	 * worker_pool flags
+	 *
+	 * A bound pool is either associated or disassociated with its CPU.
+	 * While associated (!DISASSOCIATED), all workers are bound to the
+	 * CPU and none has %WORKER_UNBOUND set and concurrency management
+	 * is in effect.
+	 *
+	 * While DISASSOCIATED, the cpu may be offline and all workers have
+	 * %WORKER_UNBOUND set and concurrency management disabled, and may
+	 * be executing on any CPU.  The pool behaves as an unbound one.
+	 *
+	 * Note that DISASSOCIATED should be flipped only while holding
+	 * manager_mutex to avoid changing binding state while
+	 * create_worker() is in progress.
+	 */
+	POOL_MANAGE_WORKERS	= 1 << 0,	/* need to manage workers */
+	POOL_DISASSOCIATED	= 1 << 2,	/* cpu can't serve workers */
+	POOL_FREEZING		= 1 << 3,	/* freeze in progress */
+
+	/* worker flags */
+	WORKER_STARTED		= 1 << 0,	/* started */
+	WORKER_DIE		= 1 << 1,	/* die die die */
+	WORKER_IDLE		= 1 << 2,	/* is idle */
+	WORKER_PREP		= 1 << 3,	/* preparing to run works */
+	WORKER_CPU_INTENSIVE	= 1 << 6,	/* cpu intensive */
+	WORKER_UNBOUND		= 1 << 7,	/* worker is unbound */
+	WORKER_REBOUND		= 1 << 8,	/* worker was rebound */
+
+	WORKER_NOT_RUNNING	= WORKER_PREP | WORKER_CPU_INTENSIVE |
+				  WORKER_UNBOUND | WORKER_REBOUND,
+
+	NR_STD_WORKER_POOLS	= 2,		/* # standard pools per cpu */
+
+	UNBOUND_POOL_HASH_ORDER	= 6,		/* hashed by pool->attrs */
+	BUSY_WORKER_HASH_ORDER	= 6,		/* 64 pointers */
+
+	MAX_IDLE_WORKERS_RATIO	= 4,		/* 1/4 of busy can be idle */
+	IDLE_WORKER_TIMEOUT	= 300 * HZ,	/* keep idle ones for 5 mins */
+
+	MAYDAY_INITIAL_TIMEOUT  = HZ / 100 >= 2 ? HZ / 100 : 2,
+						/* call for help after 10ms
+						   (min two ticks) */
+	MAYDAY_INTERVAL		= HZ / 10,	/* and then every 100ms */
+	CREATE_COOLDOWN		= HZ,		/* time to breath after fail */
+
+	/*
+	 * Rescue workers are used only on emergencies and shared by
+	 * all cpus.  Give -20.
+	 */
+	RESCUER_NICE_LEVEL	= -20,
+	HIGHPRI_NICE_LEVEL	= -20,
+
+	WQ_NAME_LEN		= 24,
+};
+
+/*
+ * Structure fields follow one of the following exclusion rules.
+ *
+ * I: Modifiable by initialization/destruction paths and read-only for
+ *    everyone else.
+ *
+ * P: Preemption protected.  Disabling preemption is enough and should
+ *    only be modified and accessed from the local cpu.
+ *
+ * L: pool->lock protected.  Access with pool->lock held.
+ *
+ * X: During normal operation, modification requires pool->lock and should
+ *    be done only from local cpu.  Either disabling preemption on local
+ *    cpu or grabbing pool->lock is enough for read access.  If
+ *    POOL_DISASSOCIATED is set, it's identical to L.
+ *
+ * MG: pool->manager_mutex and pool->lock protected.  Writes require both
+ *     locks.  Reads can happen under either lock.
+ *
+ * PL: wq_pool_mutex protected.
+ *
+ * PR: wq_pool_mutex protected for writes.  Sched-RCU protected for reads.
+ *
+ * WQ: wq->mutex protected.
+ *
+ * WR: wq->mutex protected for writes.  Sched-RCU protected for reads.
+ *
+ * MD: wq_mayday_lock protected.
+ */
+
+/* struct worker is defined in workqueue_internal.h */
+
+struct worker_pool {
+	spinlock_t		lock;		/* the pool lock */
+	int			cpu;		/* I: the associated cpu */
+	int			node;		/* I: the associated node ID */
+	int			id;		/* I: pool ID */
+	unsigned int		flags;		/* X: flags */
+
+	struct list_head	worklist;	/* L: list of pending works */
+	int			nr_workers;	/* L: total number of workers */
+
+	/* nr_idle includes the ones off idle_list for rebinding */
+	int			nr_idle;	/* L: currently idle ones */
+
+	struct list_head	idle_list;	/* X: list of idle workers */
+	struct timer_list	idle_timer;	/* L: worker idle timeout */
+	struct timer_list	mayday_timer;	/* L: SOS timer for workers */
+
+	/* a workers is either on busy_hash or idle_list, or the manager */
+	DECLARE_HASHTABLE(busy_hash, BUSY_WORKER_HASH_ORDER);
+						/* L: hash of busy workers */
+
+	/* see manage_workers() for details on the two manager mutexes */
+	struct mutex		manager_arb;	/* manager arbitration */
+	struct mutex		manager_mutex;	/* manager exclusion */
+	struct idr		worker_idr;	/* MG: worker IDs and iteration */
+
+	struct workqueue_attrs	*attrs;		/* I: worker attributes */
+	struct hlist_node	hash_node;	/* PL: unbound_pool_hash node */
+	int			refcnt;		/* PL: refcnt for unbound pools */
+
+	/*
+	 * The current concurrency level.  As it's likely to be accessed
+	 * from other CPUs during try_to_wake_up(), put it in a separate
+	 * cacheline.
+	 */
+	atomic_t		nr_running ____cacheline_aligned_in_smp;
+
+	/*
+	 * Destruction of pool is sched-RCU protected to allow dereferences
+	 * from get_work_pool().
+	 */
+	struct rcu_head		rcu;
+} ____cacheline_aligned_in_smp;
+
+/*
+ * The per-pool workqueue.  While queued, the lower WORK_STRUCT_FLAG_BITS
+ * of work_struct->data are used for flags and the remaining high bits
+ * point to the pwq; thus, pwqs need to be aligned at two's power of the
+ * number of flag bits.
+ */
+struct pool_workqueue {
+	struct worker_pool	*pool;		/* I: the associated pool */
+	struct workqueue_struct *wq;		/* I: the owning workqueue */
+	int			work_color;	/* L: current color */
+	int			flush_color;	/* L: flushing color */
+	int			refcnt;		/* L: reference count */
+	int			nr_in_flight[WORK_NR_COLORS];
+						/* L: nr of in_flight works */
+	int			nr_active;	/* L: nr of active works */
+	int			max_active;	/* L: max active works */
+	struct list_head	delayed_works;	/* L: delayed works */
+	struct list_head	pwqs_node;	/* WR: node on wq->pwqs */
+	struct list_head	mayday_node;	/* MD: node on wq->maydays */
+
+	/*
+	 * Release of unbound pwq is punted to system_wq.  See put_pwq()
+	 * and pwq_unbound_release_workfn() for details.  pool_workqueue
+	 * itself is also sched-RCU protected so that the first pwq can be
+	 * determined without grabbing wq->mutex.
+	 */
+	struct work_struct	unbound_release_work;
+	struct rcu_head		rcu;
+} __aligned(1 << WORK_STRUCT_FLAG_BITS);
+
+/*
+ * Structure used to wait for workqueue flush.
+ */
+struct wq_flusher {
+	struct list_head	list;		/* WQ: list of flushers */
+	int			flush_color;	/* WQ: flush color waiting for */
+	struct completion	done;		/* flush completion */
+};
+
+struct wq_device;
 
 /*
  * The per-CPU workqueue (if single thread, we always use the first

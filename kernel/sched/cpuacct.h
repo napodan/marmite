@@ -18,6 +18,34 @@
 
 #include <linux/cgroup.h>
 
+/* Time spent by the tasks of the cpu accounting group executing in ... */
+enum cpuacct_stat_index {
+	CPUACCT_STAT_USER,	/* ... user mode */
+	CPUACCT_STAT_SYSTEM,	/* ... kernel mode */
+
+	CPUACCT_STAT_NSTATS,
+};
+
+#ifdef CONFIG_CGROUP_CPUACCT
+
+extern void cpuacct_charge(struct task_struct *tsk, u64 cputime);
+extern void cpuacct_update_stats(struct task_struct *tsk,
+		enum cpuacct_stat_index idx, cputime_t val);
+
+#else
+
+static inline void cpuacct_charge(struct task_struct *tsk, u64 cputime)
+{
+}
+
+static inline void
+ cpuacct_update_stats(struct task_struct *tsk,
+		enum cpuacct_stat_index idx, cputime_t val)
+{
+}
+
+#endif
+
 #ifdef CONFIG_CGROUP_CPUACCT
 
 /*

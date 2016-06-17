@@ -27,7 +27,7 @@
  *	  in the structure.
  *
  *   * for structures within structures, the format of the internal
- *	structure is layed out. This allows the internal structure
+ *	structure is laid out. This allows the internal structure
  *	to be deciphered for the format file. Although these macros
  *	may become out of sync with the internal structure, they
  *	will create a compile error if it happens. Since the
@@ -53,9 +53,9 @@
  */
 
 /*
- * Function trace entry - function address and parent function addres:
+ * Function trace entry - function address and parent function address:
  */
-FTRACE_ENTRY(function, ftrace_entry,
+FTRACE_ENTRY_REG(function, ftrace_entry,
 
 	TRACE_FN,
 
@@ -64,7 +64,11 @@ FTRACE_ENTRY(function, ftrace_entry,
 		__field(	unsigned long,	parent_ip	)
 	),
 
-	F_printk(" %lx <-- %lx", __entry->ip, __entry->parent_ip)
+	F_printk(" %lx <-- %lx", __entry->ip, __entry->parent_ip),
+
+	FILTER_TRACE_FN,
+
+	perf_ftrace_event_register
 );
 
 /* Function call entry */
@@ -78,7 +82,9 @@ FTRACE_ENTRY(funcgraph_entry, ftrace_graph_ent_entry,
 		__field_desc(	int,		graph_ent,	depth		)
 	),
 
-	F_printk("--> %lx (%d)", __entry->func, __entry->depth)
+	F_printk("--> %lx (%d)", __entry->func, __entry->depth),
+
+	FILTER_OTHER
 );
 
 /* Function return entry */
@@ -98,7 +104,9 @@ FTRACE_ENTRY(funcgraph_exit, ftrace_graph_ret_entry,
 	F_printk("<-- %lx (%d) (start: %llx  end: %llx) over: %d",
 		 __entry->func, __entry->depth,
 		 __entry->calltime, __entry->rettime,
-		 __entry->depth)
+		 __entry->depth),
+
+	FILTER_OTHER
 );
 
 /*
@@ -109,12 +117,12 @@ FTRACE_ENTRY(funcgraph_exit, ftrace_graph_ret_entry,
  */
 #define FTRACE_CTX_FIELDS					\
 	__field(	unsigned int,	prev_pid	)	\
+	__field(	unsigned int,	next_pid	)	\
+	__field(	unsigned int,	next_cpu	)       \
 	__field(	unsigned char,	prev_prio	)	\
 	__field(	unsigned char,	prev_state	)	\
-	__field(	unsigned int,	next_pid	)	\
 	__field(	unsigned char,	next_prio	)	\
-	__field(	unsigned char,	next_state	)	\
-	__field(	unsigned int,	next_cpu	)
+	__field(	unsigned char,	next_state	)
 
 FTRACE_ENTRY(context_switch, ctx_switch_entry,
 
@@ -127,8 +135,9 @@ FTRACE_ENTRY(context_switch, ctx_switch_entry,
 	F_printk("%u:%u:%u  ==> %u:%u:%u [%03u]",
 		 __entry->prev_pid, __entry->prev_prio, __entry->prev_state,
 		 __entry->next_pid, __entry->next_prio, __entry->next_state,
-		 __entry->next_cpu
-		)
+		 __entry->next_cpu),
+
+	FILTER_OTHER
 );
 
 /*
@@ -146,25 +155,9 @@ FTRACE_ENTRY_DUP(wakeup, ctx_switch_entry,
 	F_printk("%u:%u:%u  ==+ %u:%u:%u [%03u]",
 		 __entry->prev_pid, __entry->prev_prio, __entry->prev_state,
 		 __entry->next_pid, __entry->next_prio, __entry->next_state,
-		 __entry->next_cpu
-		)
-);
+		 __entry->next_cpu),
 
-/*
- * Special (free-form) trace entry:
- */
-FTRACE_ENTRY(special, special_entry,
-
-	TRACE_SPECIAL,
-
-	F_STRUCT(
-		__field(	unsigned long,	arg1	)
-		__field(	unsigned long,	arg2	)
-		__field(	unsigned long,	arg3	)
-	),
-
-	F_printk("(%08lx) (%08lx) (%08lx)",
-		 __entry->arg1, __entry->arg2, __entry->arg3)
+	FILTER_OTHER
 );
 
 /*
@@ -173,19 +166,29 @@ FTRACE_ENTRY(special, special_entry,
 
 #define FTRACE_STACK_ENTRIES	8
 
+#ifndef CONFIG_64BIT
+# define IP_FMT "%08lx"
+#else
+# define IP_FMT "%016lx"
+#endif
+
 FTRACE_ENTRY(kernel_stack, stack_entry,
 
 	TRACE_STACK,
 
 	F_STRUCT(
-		__array(	unsigned long,	caller, FTRACE_STACK_ENTRIES	)
+		__field(	int,		size	)
+		__dynamic_array(unsigned long,	caller	)
 	),
 
-	F_printk("\t=> (%08lx)\n\t=> (%08lx)\n\t=> (%08lx)\n\t=> (%08lx)\n"
-		 "\t=> (%08lx)\n\t=> (%08lx)\n\t=> (%08lx)\n\t=> (%08lx)\n",
+	F_printk("\t=> (" IP_FMT ")\n\t=> (" IP_FMT ")\n\t=> (" IP_FMT ")\n"
+		 "\t=> (" IP_FMT ")\n\t=> (" IP_FMT ")\n\t=> (" IP_FMT ")\n"
+		 "\t=> (" IP_FMT ")\n\t=> (" IP_FMT ")\n",
 		 __entry->caller[0], __entry->caller[1], __entry->caller[2],
 		 __entry->caller[3], __entry->caller[4], __entry->caller[5],
-		 __entry->caller[6], __entry->caller[7])
+		 __entry->caller[6], __entry->caller[7]),
+
+	FILTER_OTHER
 );
 
 FTRACE_ENTRY(user_stack, userstack_entry,
@@ -197,11 +200,14 @@ FTRACE_ENTRY(user_stack, userstack_entry,
 		__array(	unsigned long,	caller, FTRACE_STACK_ENTRIES	)
 	),
 
-	F_printk("\t=> (%08lx)\n\t=> (%08lx)\n\t=> (%08lx)\n\t=> (%08lx)\n"
-		 "\t=> (%08lx)\n\t=> (%08lx)\n\t=> (%08lx)\n\t=> (%08lx)\n",
+	F_printk("\t=> (" IP_FMT ")\n\t=> (" IP_FMT ")\n\t=> (" IP_FMT ")\n"
+		 "\t=> (" IP_FMT ")\n\t=> (" IP_FMT ")\n\t=> (" IP_FMT ")\n"
+		 "\t=> (" IP_FMT ")\n\t=> (" IP_FMT ")\n",
 		 __entry->caller[0], __entry->caller[1], __entry->caller[2],
 		 __entry->caller[3], __entry->caller[4], __entry->caller[5],
-		 __entry->caller[6], __entry->caller[7])
+		 __entry->caller[6], __entry->caller[7]),
+
+	FILTER_OTHER
 );
 
 /*
@@ -217,8 +223,10 @@ FTRACE_ENTRY(bprint, bprint_entry,
 		__dynamic_array(	u32,	buf	)
 	),
 
-	F_printk("%08lx fmt:%p",
-		 __entry->ip, __entry->fmt)
+	F_printk("%pf: %s",
+		 (void *)__entry->ip, __entry->fmt),
+
+	FILTER_OTHER
 );
 
 FTRACE_ENTRY(print, print_entry,
@@ -230,8 +238,25 @@ FTRACE_ENTRY(print, print_entry,
 		__dynamic_array(	char,	buf	)
 	),
 
-	F_printk("%08lx %s",
-		 __entry->ip, __entry->buf)
+	F_printk("%pf: %s",
+		 (void *)__entry->ip, __entry->buf),
+
+	FILTER_OTHER
+);
+
+FTRACE_ENTRY(bputs, bputs_entry,
+
+	TRACE_BPUTS,
+
+	F_STRUCT(
+		__field(	unsigned long,	ip	)
+		__field(	const char *,	str	)
+	),
+
+	F_printk("%pf: %s",
+		 (void *)__entry->ip, __entry->str),
+
+	FILTER_OTHER
 );
 
 FTRACE_ENTRY(mmiotrace_rw, trace_mmiotrace_rw,
@@ -250,7 +275,9 @@ FTRACE_ENTRY(mmiotrace_rw, trace_mmiotrace_rw,
 
 	F_printk("%lx %lx %lx %d %x %x",
 		 (unsigned long)__entry->phys, __entry->value, __entry->pc,
-		 __entry->map_id, __entry->opcode, __entry->width)
+		 __entry->map_id, __entry->opcode, __entry->width),
+
+	FILTER_OTHER
 );
 
 FTRACE_ENTRY(mmiotrace_map, trace_mmiotrace_map,
@@ -268,36 +295,11 @@ FTRACE_ENTRY(mmiotrace_map, trace_mmiotrace_map,
 
 	F_printk("%lx %lx %lx %d %x",
 		 (unsigned long)__entry->phys, __entry->virt, __entry->len,
-		 __entry->map_id, __entry->opcode)
+		 __entry->map_id, __entry->opcode),
+
+	FILTER_OTHER
 );
 
-FTRACE_ENTRY(boot_call, trace_boot_call,
-
-	TRACE_BOOT_CALL,
-
-	F_STRUCT(
-		__field_struct(	struct boot_trace_call,	boot_call	)
-		__field_desc(	pid_t,	boot_call,	caller		)
-		__array_desc(	char,	boot_call,	func,	KSYM_SYMBOL_LEN)
-	),
-
-	F_printk("%d  %s", __entry->caller, __entry->func)
-);
-
-FTRACE_ENTRY(boot_ret, trace_boot_ret,
-
-	TRACE_BOOT_RET,
-
-	F_STRUCT(
-		__field_struct(	struct boot_trace_ret,	boot_ret	)
-		__array_desc(	char,	boot_ret,	func,	KSYM_SYMBOL_LEN)
-		__field_desc(	int,	boot_ret,	result		)
-		__field_desc(	unsigned long, boot_ret, duration	)
-	),
-
-	F_printk("%s %d %lx",
-		 __entry->func, __entry->result, __entry->duration)
-);
 
 #define TRACE_FUNC_SIZE 30
 #define TRACE_FILE_SIZE 20
@@ -315,56 +317,8 @@ FTRACE_ENTRY(branch, trace_branch,
 
 	F_printk("%u:%s:%s (%u)",
 		 __entry->line,
-		 __entry->func, __entry->file, __entry->correct)
+		 __entry->func, __entry->file, __entry->correct),
+
+	FILTER_OTHER
 );
 
-FTRACE_ENTRY(kmem_alloc, kmemtrace_alloc_entry,
-
-	TRACE_KMEM_ALLOC,
-
-	F_STRUCT(
-		__field(	enum kmemtrace_type_id,	type_id		)
-		__field(	unsigned long,		call_site	)
-		__field(	const void *,		ptr		)
-		__field(	size_t,			bytes_req	)
-		__field(	size_t,			bytes_alloc	)
-		__field(	gfp_t,			gfp_flags	)
-		__field(	int,			node		)
-	),
-
-	F_printk("type:%u call_site:%lx ptr:%p req:%zi alloc:%zi"
-		 " flags:%x node:%d",
-		 __entry->type_id, __entry->call_site, __entry->ptr,
-		 __entry->bytes_req, __entry->bytes_alloc,
-		 __entry->gfp_flags, __entry->node)
-);
-
-FTRACE_ENTRY(kmem_free, kmemtrace_free_entry,
-
-	TRACE_KMEM_FREE,
-
-	F_STRUCT(
-		__field(	enum kmemtrace_type_id,	type_id		)
-		__field(	unsigned long,		call_site	)
-		__field(	const void *,		ptr		)
-	),
-
-	F_printk("type:%u call_site:%lx ptr:%p",
-		 __entry->type_id, __entry->call_site, __entry->ptr)
-);
-
-FTRACE_ENTRY(ksym_trace, ksym_trace_entry,
-
-	TRACE_KSYM,
-
-	F_STRUCT(
-		__field(	unsigned long,	ip			  )
-		__field(	unsigned char,	type			  )
-		__array(	char	     ,	cmd,	   TASK_COMM_LEN  )
-		__field(	unsigned long,  addr			  )
-	),
-
-	F_printk("ip: %pF type: %d ksym_name: %pS cmd: %s",
-		(void *)__entry->ip, (unsigned int)__entry->type,
-		(void *)__entry->addr,  __entry->cmd)
-);

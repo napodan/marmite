@@ -98,19 +98,6 @@ void update_rq_clock(struct rq *rq)
 	update_rq_clock_task(rq, delta);
 }
 
-/**
- * runqueue_is_locked
- * @cpu: the processor in question.
- *
- * Returns true if the current cpu runqueue is locked.
- * This interface allows printk to be called with the runqueue lock
- * held and know whether or not it is OK to wake up the klogd.
- */
-int runqueue_is_locked(int cpu)
-{
-	return raw_spin_is_locked(&cpu_rq(cpu)->lock);
-}
-
 /*
  * Debugging: various feature bits
  */

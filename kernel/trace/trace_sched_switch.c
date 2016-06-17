@@ -28,7 +28,7 @@ tracing_sched_switch_trace(struct trace_array *tr,
 			   unsigned long flags, int pc)
 {
 	struct ftrace_event_call *call = &event_context_switch;
-	struct ring_buffer *buffer = tr->buffer;
+	struct ring_buffer *buffer = tr->trace_buffer.buffer;
 	struct ring_buffer_event *event;
 	struct ctx_switch_entry *entry;
 
@@ -69,7 +69,7 @@ probe_sched_switch(void *ignore, struct task_struct *prev, struct task_struct *n
 	pc = preempt_count();
 	local_irq_save(flags);
 	cpu = raw_smp_processor_id();
-	data = ctx_trace->data[cpu];
+	data = per_cpu_ptr(ctx_trace->trace_buffer.data, cpu);
 
 	if (likely(!atomic_read(&data->disabled)))
 		tracing_sched_switch_trace(ctx_trace, prev, next, flags, pc);
@@ -86,7 +86,7 @@ tracing_sched_wakeup_trace(struct trace_array *tr,
 	struct ftrace_event_call *call = &event_wakeup;
 	struct ring_buffer_event *event;
 	struct ctx_switch_entry *entry;
-	struct ring_buffer *buffer = tr->buffer;
+	struct ring_buffer *buffer = tr->trace_buffer.buffer;
 
 	event = trace_buffer_lock_reserve(buffer, TRACE_WAKE,
 					  sizeof(*entry), flags, pc);
@@ -102,9 +102,7 @@ tracing_sched_wakeup_trace(struct trace_array *tr,
 	entry->next_cpu			= task_cpu(wakee);
 
 	if (!filter_check_discard(call, entry, buffer, event))
-		ring_buffer_unlock_commit(buffer, event);
-	ftrace_trace_stack(tr->buffer, flags, 6, pc);
-	ftrace_trace_userstack(tr->buffer, flags, pc);
+		trace_buffer_unlock_commit(buffer, event, flags, pc);
 }
 
 static void
@@ -125,7 +123,7 @@ probe_sched_wakeup(void *ignore, struct task_struct *wakee, int success)
 	pc = preempt_count();
 	local_irq_save(flags);
 	cpu = raw_smp_processor_id();
-	data = ctx_trace->data[cpu];
+	data = per_cpu_ptr(ctx_trace->trace_buffer.data, cpu);
 
 	if (likely(!atomic_read(&data->disabled)))
 		tracing_sched_wakeup_trace(ctx_trace, wakee, current,
@@ -246,52 +244,4 @@ void tracing_sched_switch_assign_trace(struct trace_array *tr)
 {
 	ctx_trace = tr;
 }
-
-static void stop_sched_trace(struct trace_array *tr)
-{
-	tracing_stop_sched_switch_record();
-}
-
-static int sched_switch_trace_init(struct trace_array *tr)
-{
-	ctx_trace = tr;
-	tracing_reset_online_cpus(tr);
-	tracing_start_sched_switch_record();
-	return 0;
-}
-
-static void sched_switch_trace_reset(struct trace_array *tr)
-{
-	if (sched_ref)
-		stop_sched_trace(tr);
-}
-
-static void sched_switch_trace_start(struct trace_array *tr)
-{
-	sched_stopped = 0;
-}
-
-static void sched_switch_trace_stop(struct trace_array *tr)
-{
-	sched_stopped = 1;
-}
-
-static struct tracer sched_switch_trace __read_mostly =
-{
-	.name		= "sched_switch",
-	.init		= sched_switch_trace_init,
-	.reset		= sched_switch_trace_reset,
-	.start		= sched_switch_trace_start,
-	.stop		= sched_switch_trace_stop,
-	.wait_pipe	= poll_wait_pipe,
-#ifdef CONFIG_FTRACE_SELFTEST
-	.selftest    = trace_selftest_startup_sched_switch,
-#endif
-};
-
-__init static int init_sched_switch_trace(void)
-{
-	return register_tracer(&sched_switch_trace);
-}
-device_initcall(init_sched_switch_trace);
 

@@ -16,6 +16,10 @@
 #include <linux/kallsyms.h>
 #include <linux/utsname.h>
 
+#include "sched.h"
+
+extern struct sched_entity *__pick_next_entity(struct cfs_rq *cfs_rq);
+
 /*
  * This allows printing both to /proc/sched_debug and
  * to the console

@@ -167,6 +167,23 @@ static void bump_cpu_timer(struct k_itimer *timer,
 	}
 }
 
+/**
+ * task_cputime_zero - Check a task_cputime struct for all zero fields.
+ *
+ * @cputime:	The struct to compare.
+ *
+ * Checks @cputime to see if all fields are zero.  Returns true if all fields
+ * are zero, false if any field is nonzero.
+ */
+static inline int task_cputime_zero(const struct task_cputime *cputime)
+{
+	if (cputime_eq(cputime->utime, cputime_zero) &&
+	    cputime_eq(cputime->stime, cputime_zero) &&
+	    cputime->sum_exec_runtime == 0)
+		return 1;
+	return 0;
+}
+
 static inline cputime_t prof_ticks(struct task_struct *p)
 {
 	return cputime_add(p->utime, p->stime);
@@ -230,37 +247,6 @@ static int cpu_clock_sample(const clockid_t which_clock, struct task_struct *p,
 	return 0;
 }
 
-void thread_group_cputime(struct task_struct *tsk, struct task_cputime *times)
-{
-	struct sighand_struct *sighand;
-	struct signal_struct *sig;
-	struct task_struct *t;
-
-	*times = INIT_CPUTIME;
-
-	rcu_read_lock();
-	sighand = rcu_dereference(tsk->sighand);
-	if (!sighand)
-		goto out;
-
-	sig = tsk->signal;
-
-	t = tsk;
-	do {
-		times->utime = cputime_add(times->utime, t->utime);
-		times->stime = cputime_add(times->stime, t->stime);
-		times->sum_exec_runtime += t->se.sum_exec_runtime;
-
-		t = next_thread(t);
-	} while (t != tsk);
-
-	times->utime = cputime_add(times->utime, sig->utime);
-	times->stime = cputime_add(times->stime, sig->stime);
-	times->sum_exec_runtime += sig->sum_sched_runtime;
-out:
-	rcu_read_unlock();
-}
-
 static void update_gt_cputime(struct task_cputime *a, struct task_cputime *b)
 {
 	if (cputime_gt(b->utime, a->utime))
@@ -317,7 +303,8 @@ static int cpu_clock_sample_group(const clockid_t which_clock,
 		cpu->cpu = cputime.utime;
 		break;
 	case CPUCLOCK_SCHED:
-		cpu->sched = thread_group_sched_runtime(p);
+		thread_group_cputime(p, &cputime);
+		cpu->sched = cputime.sum_exec_runtime;
 		break;
 	}
 	return 0;
@@ -1039,23 +1026,6 @@ static void check_cpu_itimer(struct task_struct *tsk, struct cpu_itimer *it,
 	     cputime_lt(it->expires, *expires))) {
 		*expires = it->expires;
 	}
-}
-
-/**
- * task_cputime_zero - Check a task_cputime struct for all zero fields.
- *
- * @cputime:	The struct to compare.
- *
- * Checks @cputime to see if all fields are zero.  Returns true if all fields
- * are zero, false if any field is nonzero.
- */
-static inline int task_cputime_zero(const struct task_cputime *cputime)
-{
-	if (cputime_eq(cputime->utime, cputime_zero) &&
-	    cputime_eq(cputime->stime, cputime_zero) &&
-	    cputime->sum_exec_runtime == 0)
-		return 1;
-	return 0;
 }
 
 /*

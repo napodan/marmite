@@ -22,6 +22,18 @@
 
 #include <linux/latencytop.h>
 #include <linux/sched.h>
+#include <linux/cpumask.h>
+#include <linux/slab.h>
+#include <linux/profile.h>
+#include <linux/interrupt.h>
+#include <linux/mempolicy.h>
+#include <linux/migrate.h>
+//#include <linux/task_work.h>
+#include <linux/ratelimit.h>
+
+#include <trace/events/sched.h>
+
+#include "sched.h"
 
 /*
  * Targeted preemption latency for CPU-bound tasks:
@@ -37,6 +49,9 @@
  */
 unsigned int sysctl_sched_latency = 6000000ULL;
 unsigned int normalized_sysctl_sched_latency = 6000000ULL;
+extern unsigned int normalized_sysctl_sched_shares_ratelimit;
+extern int get_update_sysctl_factor(void);
+
 
 /*
  * The initial- and re-scaling of tunables is configurable
@@ -88,6 +103,72 @@ unsigned int sysctl_sched_wakeup_granularity = 1000000UL;
 unsigned int normalized_sysctl_sched_wakeup_granularity = 1000000UL;
 
 const_debug unsigned int sysctl_sched_migration_cost = 500000UL;
+
+/*
+ * Increase the granularity value when there are more CPUs,
+ * because with more CPUs the 'effective latency' as visible
+ * to users decreases. But the relationship is not linear,
+ * so pick a second-best guess by going with the log2 of the
+ * number of CPUs.
+ *
+ * This idea comes from the SD scheduler of Con Kolivas:
+ */
+int get_update_sysctl_factor(void)
+{
+	unsigned int cpus = min_t(int, num_online_cpus(), 8);
+	unsigned int factor;
+
+	switch (sysctl_sched_tunable_scaling) {
+	case SCHED_TUNABLESCALING_NONE:
+		factor = 1;
+		break;
+	case SCHED_TUNABLESCALING_LINEAR:
+		factor = cpus;
+		break;
+	case SCHED_TUNABLESCALING_LOG:
+	default:
+		factor = 1 + ilog2(cpus);
+		break;
+	}
+
+	return factor;
+}
+
+extern unsigned int normalized_sysctl_sched_min_granularity;
+extern unsigned int normalized_sysctl_sched_latency;
+extern unsigned int normalized_sysctl_sched_wakeup_granularity;
+/*
+ * ratelimit for updating the group shares.
+ * default: 0.25ms
+ */
+unsigned int sysctl_sched_shares_ratelimit = 250000;
+unsigned int normalized_sysctl_sched_shares_ratelimit = 250000;
+
+/*
+ * Inject some fuzzyness into changing the per-cpu group shares
+ * this avoids remote rq-locks at the expense of fairness.
+ * default: 4
+ */
+unsigned int sysctl_sched_shares_thresh = 4;
+
+
+static void update_sysctl(void)
+{
+	unsigned int factor = get_update_sysctl_factor();
+
+#define SET_SYSCTL(name) \
+	(sysctl_##name = (factor) * normalized_sysctl_##name)
+	SET_SYSCTL(sched_min_granularity);
+	SET_SYSCTL(sched_latency);
+	SET_SYSCTL(sched_wakeup_granularity);
+	SET_SYSCTL(sched_shares_ratelimit);
+#undef SET_SYSCTL
+}
+
+void sched_init_granularity(void)
+{
+	update_sysctl();
+}
 
 #if BITS_PER_LONG == 32
 # define WMULT_CONST	(~0UL)
@@ -418,7 +499,7 @@ static void __dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 	rb_erase(&se->run_node, &cfs_rq->tasks_timeline);
 }
 
-static struct sched_entity *__pick_next_entity(struct cfs_rq *cfs_rq)
+struct sched_entity *__pick_next_entity(struct cfs_rq *cfs_rq)
 {
 	struct rb_node *left = cfs_rq->rb_leftmost;
 
@@ -802,8 +883,7 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int initial)
 	se->vruntime = vruntime;
 }
 
-static void
-enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+void enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 {
 	/*
 	 * Update the normalized vruntime before updating min_vruntime
@@ -844,8 +924,7 @@ static void clear_buddies(struct cfs_rq *cfs_rq, struct sched_entity *se)
 		__clear_buddies(cfs_rq_of(se), se);
 }
 
-static void
-dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+void dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 {
 	u64 min_vruntime;
 
@@ -3722,6 +3801,16 @@ static void set_curr_task_fair(struct rq *rq)
 
 	for_each_sched_entity(se)
 		set_next_entity(cfs_rq_of(se), se);
+}
+
+void init_cfs_rq(struct cfs_rq *cfs_rq, struct rq *rq)
+{
+	cfs_rq->tasks_timeline = RB_ROOT;
+	INIT_LIST_HEAD(&cfs_rq->tasks);
+#ifdef CONFIG_FAIR_GROUP_SCHED
+	cfs_rq->rq = rq;
+#endif
+	cfs_rq->min_vruntime = (u64)(-(1LL << 20));
 }
 
 #ifdef CONFIG_FAIR_GROUP_SCHED

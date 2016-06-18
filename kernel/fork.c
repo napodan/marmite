@@ -1070,14 +1070,10 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 
 	init_sigpending(&p->pending);
 
-	p->utime = cputime_zero;
-	p->stime = cputime_zero;
-	p->gtime = cputime_zero;
-	p->utimescaled = cputime_zero;
-	p->stimescaled = cputime_zero;
+	p->utime = p->stime = p->gtime = 0;
+	p->utimescaled = p->stimescaled = 0;
 #ifndef CONFIG_VIRT_CPU_ACCOUNTING
-	p->prev_utime = cputime_zero;
-	p->prev_stime = cputime_zero;
+	p->prev_cputime.utime = p->prev_cputime.stime = 0;
 #endif
 #if defined(SPLIT_RSS_COUNTING)
 	memset(&p->rss_stat, 0, sizeof(p->rss_stat));

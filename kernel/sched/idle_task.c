@@ -1,15 +1,28 @@
+#include "sched.h"
+
 /*
  * idle-task scheduling class.
  *
  * (NOTE: these are not related to SCHED_IDLE tasks which are
- *  handled in sched_fair.c)
+ *  handled in sched/fair.c)
  */
 
 #ifdef CONFIG_SMP
 static int
-select_task_rq_idle(struct rq *rq, struct task_struct *p, int sd_flag, int flags)
+select_task_rq_idle(struct task_struct *p, int sd_flag, int flags)
 {
 	return task_cpu(p); /* IDLE tasks as never migrated */
+}
+
+static void pre_schedule_idle(struct rq *rq, struct task_struct *prev)
+{
+	idle_exit_fair(rq);
+	rq_last_tick_reset(rq);
+}
+
+static void post_schedule_idle(struct rq *rq)
+{
+	idle_enter_fair(rq);
 }
 #endif /* CONFIG_SMP */
 /*
@@ -20,10 +33,16 @@ static void check_preempt_curr_idle(struct rq *rq, struct task_struct *p, int fl
 	resched_task(rq->idle);
 }
 
+extern void calc_load_account_idle(struct rq *this_rq);
+
 static struct task_struct *pick_next_task_idle(struct rq *rq)
 {
 	schedstat_inc(rq, sched_goidle);
 	calc_load_account_idle(rq);
+#ifdef CONFIG_SMP
+	/* Trigger the post schedule to do an idle_enter for CFS */
+	rq->post_schedule = 1;
+#endif
 	return rq->idle;
 }
 
@@ -62,8 +81,9 @@ static void switched_to_idle(struct rq *rq, struct task_struct *p,
 		check_preempt_curr(rq, p, 0);
 }
 
-static void prio_changed_idle(struct rq *rq, struct task_struct *p,
-			      int oldprio, int running)
+static void
+prio_changed_idle(struct rq *rq, struct task_struct *p, int oldprio,
+			int running)
 {
 	/* This can happen for hot plug CPUS */
 

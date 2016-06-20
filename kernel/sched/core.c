@@ -8933,15 +8933,6 @@ static inline void unregister_rt_sched_group(struct task_group *tg, int cpu)
 	list_del_rcu(&tg->rt_rq[cpu]->leaf_rt_rq_list);
 }
 #else /* !CONFIG_RT_GROUP_SCHED */
-void free_rt_sched_group(struct task_group *tg)
-{
-}
-
-int alloc_rt_sched_group(struct task_group *tg, struct task_group *parent)
-{
-	return 1;
-}
-
 static inline void register_rt_sched_group(struct task_group *tg, int cpu)
 {
 }
@@ -9241,7 +9232,9 @@ long sched_group_rt_period(struct task_group *tg)
 	do_div(rt_period_us, NSEC_PER_USEC);
 	return rt_period_us;
 }
+#endif /* CONFIG_RT_GROUP_SCHED */
 
+#ifdef CONFIG_RT_GROUP_SCHED
 static int sched_rt_global_constraints(void)
 {
 	u64 runtime, period;
@@ -9281,7 +9274,7 @@ int sched_rt_can_attach(struct task_group *tg, struct task_struct *tsk)
 static int sched_rt_global_constraints(void)
 {
 	unsigned long flags;
-	int i;
+	int i, ret = 0;
 
 	if (sysctl_sched_rt_period <= 0)
 		return -EINVAL;
@@ -9303,7 +9296,7 @@ static int sched_rt_global_constraints(void)
 	}
 	raw_spin_unlock_irqrestore(&def_rt_bandwidth.rt_runtime_lock, flags);
 
-	return 0;
+	return ret;
 }
 #endif /* CONFIG_RT_GROUP_SCHED */
 
@@ -9346,8 +9339,7 @@ static inline struct task_group *cgroup_tg(struct cgroup *cgrp)
 			    struct task_group, css);
 }
 
-static struct cgroup_subsys_state *
-cpu_cgroup_create(struct cgroup_subsys *ss, struct cgroup *cgrp)
+static struct cgroup_subsys_state *cpu_cgroup_create(struct cgroup_subsys *ss, struct cgroup *cgrp)
 {
 	struct task_group *tg, *parent;
 

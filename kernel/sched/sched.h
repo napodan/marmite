@@ -2,7 +2,7 @@
 #include <linux/sched.h>
 //#include <linux/sched/sysctl.h>
 #include <linux/sched/rt.h>
-//#include <linux/sched/deadline.h>
+#include <linux/sched/deadline.h>
 #include <linux/mutex.h>
 #include <linux/spinlock.h>
 #include <linux/stop_machine.h>
@@ -86,10 +86,10 @@ static inline int task_has_rt_policy(struct task_struct *p)
 //	return dl_policy(p->policy);
 //}
 
-//static inline bool dl_time_before(u64 a, u64 b)
-//{
-//	return (s64)(a - b) < 0;
-//}
+static inline bool dl_time_before(u64 a, u64 b)
+{
+	return (s64)(a - b) < 0;
+}
 
 /*
  * This is the priority-queue data structure of the RT scheduling class:
@@ -1257,6 +1257,11 @@ static const u32 prio_to_wmult[40] = {
  /*  10 */  39045157,  49367440,  61356676,  76695844,  95443717,
  /*  15 */ 119304647, 148102320, 186737708, 238609294, 286331153,
 };
+
+#define ENQUEUE_REPLENISH	16
+
+
+
 
 #define sched_class_highest (&rt_sched_class)
 #define for_each_class(class) \

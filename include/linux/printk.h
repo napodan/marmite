@@ -2,6 +2,10 @@
 #define __KERNEL_PRINTK__
 
 #ifdef CONFIG_PRINTK
+/*
+ * Special printk facility for scheduler/timekeeping use only, _DO_NOT_USE_ !
+ */
+#define printk_deferred printk
 void dump_stack_print_info(const char *log_lvl);
 #else
 static inline __printf(1, 0)

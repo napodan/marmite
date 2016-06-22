@@ -13,6 +13,7 @@
 #include <linux/spinlock.h>
 #include <linux/module.h>
 #include <linux/sched.h>
+#include <linux/sched/rt.h>
 #include <linux/timer.h>
 
 #include "rtmutex_common.h"
@@ -110,6 +111,14 @@ int rt_mutex_getprio(struct task_struct *task)
 
 	return min(task_top_pi_waiter(task)->pi_list_entry.prio,
 		   task->normal_prio);
+}
+
+struct task_struct *rt_mutex_get_top_task(struct task_struct *task)
+{
+	if (likely(!task_has_pi_waiters(task)))
+		return NULL;
+
+	return task_top_pi_waiter(task)->task;
 }
 
 /*

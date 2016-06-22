@@ -541,4 +541,314 @@ unlock:
 	return HRTIMER_NORESTART;
 }
 
+void init_dl_task_timer(struct sched_dl_entity *dl_se)
+{
+	struct hrtimer *timer = &dl_se->dl_timer;
+
+	if (hrtimer_active(timer)) {
+		hrtimer_try_to_cancel(timer);
+		return;
+	}
+
+	hrtimer_init(timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	timer->function = dl_task_timer;
+}
+
+static
+int dl_runtime_exceeded(struct rq *rq, struct sched_dl_entity *dl_se)
+{
+	int dmiss = dl_time_before(dl_se->deadline, rq_clock(rq));
+	int rorun = dl_se->runtime <= 0;
+
+	if (!rorun && !dmiss)
+		return 0;
+
+	/*
+	 * If we are beyond our current deadline and we are still
+	 * executing, then we have already used some of the runtime of
+	 * the next instance. Thus, if we do not account that, we are
+	 * stealing bandwidth from the system at each deadline miss!
+	 */
+	if (dmiss) {
+		dl_se->runtime = rorun ? dl_se->runtime : 0;
+		dl_se->runtime -= rq_clock(rq) - dl_se->deadline;
+	}
+
+	return 1;
+}
+
+extern bool sched_rt_bandwidth_account(struct rt_rq *rt_rq);
+
+/*
+ * Update the current task's runtime statistics (provided it is still
+ * a -deadline task and has not been removed from the dl_rq).
+ */
+static void update_curr_dl(struct rq *rq)
+{
+	struct task_struct *curr = rq->curr;
+	struct sched_dl_entity *dl_se = &curr->dl;
+	u64 delta_exec;
+
+	if (!dl_task(curr) || !on_dl_rq(dl_se))
+		return;
+
+	/*
+	 * Consumed budget is computed considering the time as
+	 * observed by schedulable tasks (excluding time spent
+	 * in hardirq context, etc.). Deadlines are instead
+	 * computed using hard walltime. This seems to be the more
+	 * natural solution, but the full ramifications of this
+	 * approach need further study.
+	 */
+	delta_exec = rq_clock_task(rq) - curr->se.exec_start;
+	if (unlikely((s64)delta_exec < 0))
+		delta_exec = 0;
+
+	schedstat_set(curr->se.statistics.exec_max,
+		      max(curr->se.statistics.exec_max, delta_exec));
+
+	curr->se.sum_exec_runtime += delta_exec;
+	account_group_exec_runtime(curr, delta_exec);
+
+	curr->se.exec_start = rq_clock_task(rq);
+	cpuacct_charge(curr, delta_exec);
+
+	sched_rt_avg_update(rq, delta_exec);
+
+	dl_se->runtime -= delta_exec;
+	if (dl_runtime_exceeded(rq, dl_se)) {
+		__dequeue_task_dl(rq, curr, 0);
+		if (likely(start_dl_timer(dl_se, curr->dl.dl_boosted)))
+			dl_se->dl_throttled = 1;
+		else
+			enqueue_task_dl(rq, curr, ENQUEUE_REPLENISH);
+
+		if (!is_leftmost(curr, &rq->dl))
+			resched_task(curr);
+	}
+
+	/*
+	 * Because -- for now -- we share the rt bandwidth, we need to
+	 * account our runtime there too, otherwise actual rt tasks
+	 * would be able to exceed the shared quota.
+	 *
+	 * Account to the root rt group for now.
+	 *
+	 * The solution we're working towards is having the RT groups scheduled
+	 * using deadline servers -- however there's a few nasties to figure
+	 * out before that can happen.
+	 */
+	if (rt_bandwidth_enabled()) {
+		struct rt_rq *rt_rq = &rq->rt;
+
+		raw_spin_lock(&rt_rq->rt_runtime_lock);
+		/*
+		 * We'll let actual RT tasks worry about the overflow here, we
+		 * have our own CBS to keep us inline; only account when RT
+		 * bandwidth is relevant.
+		 */
+		if (sched_rt_bandwidth_account(rt_rq))
+			rt_rq->rt_time += delta_exec;
+		raw_spin_unlock(&rt_rq->rt_runtime_lock);
+	}
+}
+
+#ifdef CONFIG_SMP
+
+static struct task_struct *pick_next_earliest_dl_task(struct rq *rq, int cpu);
+
+static inline u64 next_deadline(struct rq *rq)
+{
+	struct task_struct *next = pick_next_earliest_dl_task(rq, rq->cpu);
+
+	if (next && dl_prio(next->prio))
+		return next->dl.deadline;
+	else
+		return 0;
+}
+
+static void inc_dl_deadline(struct dl_rq *dl_rq, u64 deadline)
+{
+	struct rq *rq = rq_of_dl_rq(dl_rq);
+
+	if (dl_rq->earliest_dl.curr == 0 ||
+	    dl_time_before(deadline, dl_rq->earliest_dl.curr)) {
+		/*
+		 * If the dl_rq had no -deadline tasks, or if the new task
+		 * has shorter deadline than the current one on dl_rq, we
+		 * know that the previous earliest becomes our next earliest,
+		 * as the new task becomes the earliest itself.
+		 */
+		dl_rq->earliest_dl.next = dl_rq->earliest_dl.curr;
+		dl_rq->earliest_dl.curr = deadline;
+		cpudl_set(&rq->rd->cpudl, rq->cpu, deadline, 1);
+	} else if (dl_rq->earliest_dl.next == 0 ||
+		   dl_time_before(deadline, dl_rq->earliest_dl.next)) {
+		/*
+		 * On the other hand, if the new -deadline task has a
+		 * a later deadline than the earliest one on dl_rq, but
+		 * it is earlier than the next (if any), we must
+		 * recompute the next-earliest.
+		 */
+		dl_rq->earliest_dl.next = next_deadline(rq);
+	}
+}
+
+static void dec_dl_deadline(struct dl_rq *dl_rq, u64 deadline)
+{
+	struct rq *rq = rq_of_dl_rq(dl_rq);
+
+	/*
+	 * Since we may have removed our earliest (and/or next earliest)
+	 * task we must recompute them.
+	 */
+	if (!dl_rq->dl_nr_running) {
+		dl_rq->earliest_dl.curr = 0;
+		dl_rq->earliest_dl.next = 0;
+		cpudl_set(&rq->rd->cpudl, rq->cpu, 0, 0);
+	} else {
+		struct rb_node *leftmost = dl_rq->rb_leftmost;
+		struct sched_dl_entity *entry;
+
+		entry = rb_entry(leftmost, struct sched_dl_entity, rb_node);
+		dl_rq->earliest_dl.curr = entry->deadline;
+		dl_rq->earliest_dl.next = next_deadline(rq);
+		cpudl_set(&rq->rd->cpudl, rq->cpu, entry->deadline, 1);
+	}
+}
+
+#else
+
+static inline void inc_dl_deadline(struct dl_rq *dl_rq, u64 deadline) {}
+static inline void dec_dl_deadline(struct dl_rq *dl_rq, u64 deadline) {}
+
+#endif /* CONFIG_SMP */
+
+#ifdef CONFIG_SCHED_HMP
+
+static void
+inc_hmp_sched_stats_dl(struct rq *rq, struct task_struct *p)
+{
+	inc_cumulative_runnable_avg(&rq->hmp_stats, p);
+}
+
+static void
+dec_hmp_sched_stats_dl(struct rq *rq, struct task_struct *p)
+{
+	dec_cumulative_runnable_avg(&rq->hmp_stats, p);
+}
+
+#else	/* CONFIG_SCHED_HMP */
+
+static inline void
+inc_hmp_sched_stats_dl(struct rq *rq, struct task_struct *p) { }
+
+static inline void
+dec_hmp_sched_stats_dl(struct rq *rq, struct task_struct *p) { }
+
+#endif	/* CONFIG_SCHED_HMP */
+
+static inline
+void inc_dl_tasks(struct sched_dl_entity *dl_se, struct dl_rq *dl_rq)
+{
+	int prio = dl_task_of(dl_se)->prio;
+	u64 deadline = dl_se->deadline;
+
+	WARN_ON(!dl_prio(prio));
+	dl_rq->dl_nr_running++;
+	inc_nr_running(rq_of_dl_rq(dl_rq));
+	inc_hmp_sched_stats_dl(rq_of_dl_rq(dl_rq), dl_task_of(dl_se));
+
+	inc_dl_deadline(dl_rq, deadline);
+	inc_dl_migration(dl_se, dl_rq);
+}
+
+static inline
+void dec_dl_tasks(struct sched_dl_entity *dl_se, struct dl_rq *dl_rq)
+{
+	int prio = dl_task_of(dl_se)->prio;
+
+	WARN_ON(!dl_prio(prio));
+	WARN_ON(!dl_rq->dl_nr_running);
+	dl_rq->dl_nr_running--;
+	dec_nr_running(rq_of_dl_rq(dl_rq));
+	dec_hmp_sched_stats_dl(rq_of_dl_rq(dl_rq), dl_task_of(dl_se));
+
+	dec_dl_deadline(dl_rq, dl_se->deadline);
+	dec_dl_migration(dl_se, dl_rq);
+}
+
+static void __enqueue_dl_entity(struct sched_dl_entity *dl_se)
+{
+	struct dl_rq *dl_rq = dl_rq_of_se(dl_se);
+	struct rb_node **link = &dl_rq->rb_root.rb_node;
+	struct rb_node *parent = NULL;
+	struct sched_dl_entity *entry;
+	int leftmost = 1;
+
+	BUG_ON(!RB_EMPTY_NODE(&dl_se->rb_node));
+
+	while (*link) {
+		parent = *link;
+		entry = rb_entry(parent, struct sched_dl_entity, rb_node);
+		if (dl_time_before(dl_se->deadline, entry->deadline))
+			link = &parent->rb_left;
+		else {
+			link = &parent->rb_right;
+			leftmost = 0;
+		}
+	}
+
+	if (leftmost)
+		dl_rq->rb_leftmost = &dl_se->rb_node;
+
+	rb_link_node(&dl_se->rb_node, parent, link);
+	rb_insert_color(&dl_se->rb_node, &dl_rq->rb_root);
+
+	inc_dl_tasks(dl_se, dl_rq);
+}
+
+static void __dequeue_dl_entity(struct sched_dl_entity *dl_se)
+{
+	struct dl_rq *dl_rq = dl_rq_of_se(dl_se);
+
+	if (RB_EMPTY_NODE(&dl_se->rb_node))
+		return;
+
+	if (dl_rq->rb_leftmost == &dl_se->rb_node) {
+		struct rb_node *next_node;
+
+		next_node = rb_next(&dl_se->rb_node);
+		dl_rq->rb_leftmost = next_node;
+	}
+
+	rb_erase(&dl_se->rb_node, &dl_rq->rb_root);
+	RB_CLEAR_NODE(&dl_se->rb_node);
+
+	dec_dl_tasks(dl_se, dl_rq);
+}
+
+static void
+enqueue_dl_entity(struct sched_dl_entity *dl_se,
+		  struct sched_dl_entity *pi_se, int flags)
+{
+	BUG_ON(on_dl_rq(dl_se));
+
+	/*
+	 * If this is a wakeup or a new instance, the scheduling
+	 * parameters of the task might need updating. Otherwise,
+	 * we want a replenishment of its runtime.
+	 */
+	if (!dl_se->dl_new && flags & ENQUEUE_REPLENISH)
+		replenish_dl_entity(dl_se, pi_se);
+	else
+		update_dl_entity(dl_se, pi_se);
+
+	__enqueue_dl_entity(dl_se);
+}
+
+static void dequeue_dl_entity(struct sched_dl_entity *dl_se)
+{
+	__dequeue_dl_entity(dl_se);
+}
 

@@ -258,7 +258,7 @@ static void __kthread_bind(struct task_struct *p, unsigned int cpu, long state)
 		return;
 	}
 	p->cpus_allowed = cpumask_of_cpu(cpu);
-	p->rt.nr_cpus_allowed = 1;
+	p->nr_cpus_allowed = 1;
 	p->flags |= PF_THREAD_BOUND;
 }
 

@@ -71,38 +71,35 @@ static void set_curr_task_idle(struct rq *rq)
 {
 }
 
-static void switched_to_idle(struct rq *rq, struct task_struct *p,
-			     int running)
+static void switched_to_idle(struct rq *rq, struct task_struct *p)
 {
-	/* Can this actually happen?? */
-	if (running)
-		resched_task(rq->curr);
-	else
-		check_preempt_curr(rq, p, 0);
+	BUG();
 }
 
 static void
-prio_changed_idle(struct rq *rq, struct task_struct *p, int oldprio,
-			int running)
+prio_changed_idle(struct rq *rq, struct task_struct *p, int oldprio)
 {
-	/* This can happen for hot plug CPUS */
-
-	/*
-	 * Reschedule if we are currently running on this runqueue and
-	 * our priority decreased, or if we are not currently running on
-	 * this runqueue and our priority is higher than the current's
-	 */
-	if (running) {
-		if (p->prio > oldprio)
-			resched_task(rq->curr);
-	} else
-		check_preempt_curr(rq, p, 0);
+	BUG();
 }
 
 static unsigned int get_rr_interval_idle(struct rq *rq, struct task_struct *task)
 {
 	return 0;
 }
+
+#ifdef CONFIG_SCHED_HMP
+
+static void
+inc_hmp_sched_stats_idle(struct rq *rq, struct task_struct *p)
+{
+}
+
+static void
+dec_hmp_sched_stats_idle(struct rq *rq, struct task_struct *p)
+{
+}
+
+#endif
 
 /*
  * Simple, special scheduling class for the per-CPU idle tasks:
@@ -121,6 +118,8 @@ const struct sched_class idle_sched_class = {
 
 #ifdef CONFIG_SMP
 	.select_task_rq		= select_task_rq_idle,
+	.pre_schedule		= pre_schedule_idle,
+	.post_schedule		= post_schedule_idle,
 #endif
 
 	.set_curr_task          = set_curr_task_idle,
@@ -130,6 +129,8 @@ const struct sched_class idle_sched_class = {
 
 	.prio_changed		= prio_changed_idle,
 	.switched_to		= switched_to_idle,
-
-	/* no .task_new for idle tasks */
+#ifdef CONFIG_SCHED_HMP
+	.inc_hmp_sched_stats	= inc_hmp_sched_stats_idle,
+	.dec_hmp_sched_stats	= dec_hmp_sched_stats_idle,
+#endif
 };

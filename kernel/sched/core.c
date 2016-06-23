@@ -914,14 +914,14 @@ inline int task_curr(const struct task_struct *p)
 
 static inline void check_class_changed(struct rq *rq, struct task_struct *p,
 				       const struct sched_class *prev_class,
-				       int oldprio, int running)
+				       int oldprio)
 {
 	if (prev_class != p->sched_class) {
 		if (prev_class->switched_from)
-			prev_class->switched_from(rq, p, running);
-		p->sched_class->switched_to(rq, p, running);
+			prev_class->switched_from(rq, p);
+		p->sched_class->switched_to(rq, p);
 	} else
-		p->sched_class->prio_changed(rq, p, oldprio, running);
+		p->sched_class->prio_changed(rq, p, oldprio);
 }
 
 void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags)
@@ -5313,11 +5313,11 @@ void rt_mutex_setprio(struct task_struct *p, int prio)
 
 	if (running)
 		p->sched_class->set_curr_task(rq);
-	if (on_rq) {
+	if (on_rq)
 		enqueue_task(rq, p, oldprio < prio ? ENQUEUE_HEAD : 0);
 
-		check_class_changed(rq, p, prev_class, oldprio, running);
-	}
+	check_class_changed(rq, p, prev_class, oldprio);
+out_unlock:
 	task_rq_unlock(rq, &flags);
 }
 
@@ -5639,11 +5639,10 @@ recheck:
 
 	if (running)
 		p->sched_class->set_curr_task(rq);
-	if (on_rq) {
+	if (on_rq)
 		activate_task(rq, p, 0);
 
-		check_class_changed(rq, p, prev_class, oldprio, running);
-	}
+	check_class_changed(rq, p, prev_class, oldprio);
 	__task_rq_unlock(rq);
 	raw_spin_unlock_irqrestore(&p->pi_lock, flags);
 

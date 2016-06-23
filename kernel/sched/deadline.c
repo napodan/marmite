@@ -1696,9 +1696,9 @@ const struct sched_class dl_sched_class = {
 	.task_fork              = task_fork_dl,
 //	.task_dead		= task_dead_dl,
 
-//	.prio_changed           = prio_changed_dl,
-//	.switched_from		= switched_from_dl,
-//	.switched_to		= switched_to_dl,
+	.prio_changed           = prio_changed_dl,
+	.switched_from		= switched_from_dl,
+	.switched_to		= switched_to_dl,
 
 #ifdef CONFIG_SCHED_HMP
 	.inc_hmp_sched_stats	= inc_hmp_sched_stats_dl,

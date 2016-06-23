@@ -71,24 +71,33 @@ static inline int rt_policy(int policy)
 	return 0;
 }
 
-//static inline int dl_policy(int policy)
-//{
-//	return policy == SCHED_DEADLINE;
-//}
+static inline int dl_policy(int policy)
+{
+	return policy == SCHED_DEADLINE;
+}
 
 static inline int task_has_rt_policy(struct task_struct *p)
 {
 	return rt_policy(p->policy);
 }
 
-//static inline int task_has_dl_policy(struct task_struct *p)
-//{
-//	return dl_policy(p->policy);
-//}
+static inline int task_has_dl_policy(struct task_struct *p)
+{
+	return dl_policy(p->policy);
+}
 
 static inline bool dl_time_before(u64 a, u64 b)
 {
 	return (s64)(a - b) < 0;
+}
+
+/*
+ * Tells if entity @a should preempt entity @b.
+ */
+static inline bool
+dl_entity_preempt(struct sched_dl_entity *a, struct sched_dl_entity *b)
+{
+	return dl_time_before(a->deadline, b->deadline);
 }
 
 /*
@@ -106,6 +115,8 @@ struct rt_bandwidth {
 	u64			rt_runtime;
 	struct hrtimer		rt_period_timer;
 };
+
+void __dl_clear_params(struct task_struct *p);
 
 /*
  * To keep the bandwidth of -deadline tasks and groups under control
@@ -136,6 +147,8 @@ struct dl_bandwidth {
 	u64 dl_runtime;
 	u64 dl_period;
 };
+
+extern struct dl_bw *dl_bw_of(int i);
 
 struct dl_bw {
 	raw_spinlock_t lock;
@@ -1258,10 +1271,68 @@ static const u32 prio_to_wmult[40] = {
  /*  15 */ 119304647, 148102320, 186737708, 238609294, 286331153,
 };
 
+#define ENQUEUE_WAKEUP		1
+#define ENQUEUE_HEAD		2
+#ifdef CONFIG_SMP
+#define ENQUEUE_WAKING		4	/* sched_class::task_waking was called */
+#else
+#define ENQUEUE_WAKING		0
+#endif
 #define ENQUEUE_REPLENISH	16
 
+#define DEQUEUE_SLEEP		1
 
 
+struct sched_class {
+	const struct sched_class *next;
+
+	void (*enqueue_task) (struct rq *rq, struct task_struct *p, int flags);
+	void (*dequeue_task) (struct rq *rq, struct task_struct *p, int flags);
+	void (*yield_task) (struct rq *rq);
+
+	void (*check_preempt_curr) (struct rq *rq, struct task_struct *p, int flags);
+
+	struct task_struct * (*pick_next_task) (struct rq *rq);
+	void (*put_prev_task) (struct rq *rq, struct task_struct *p);
+
+#ifdef CONFIG_SMP
+	int  (*select_task_rq)(struct task_struct *p, int sd_flag, int flags);
+	void (*migrate_task_rq)(struct task_struct *p, int next_cpu);
+
+	void (*pre_schedule) (struct rq *this_rq, struct task_struct *task);
+	void (*post_schedule) (struct rq *this_rq);
+	void (*task_waking) (struct task_struct *task);
+	void (*task_woken) (struct rq *this_rq, struct task_struct *task);
+
+	void (*set_cpus_allowed)(struct task_struct *p,
+				 const struct cpumask *newmask);
+
+	void (*rq_online)(struct rq *rq);
+	void (*rq_offline)(struct rq *rq);
+#endif
+
+	void (*set_curr_task) (struct rq *rq);
+	void (*task_tick) (struct rq *rq, struct task_struct *p, int queued);
+	void (*task_fork) (struct task_struct *p);
+
+	void (*switched_from) (struct rq *this_rq, struct task_struct *task,
+			       int running);
+	void (*switched_to) (struct rq *this_rq, struct task_struct *task,
+			     int running);
+	void (*prio_changed) (struct rq *this_rq, struct task_struct *task,
+			     int oldprio, int running);
+
+	unsigned int (*get_rr_interval) (struct rq *rq,
+					 struct task_struct *task);
+
+#ifdef CONFIG_FAIR_GROUP_SCHED
+	void (*task_move_group) (struct task_struct *p, int on_rq);
+#endif
+#ifdef CONFIG_SCHED_HMP
+	void (*inc_hmp_sched_stats)(struct rq *rq, struct task_struct *p);
+	void (*dec_hmp_sched_stats)(struct rq *rq, struct task_struct *p);
+#endif
+};
 
 #define sched_class_highest (&rt_sched_class)
 #define for_each_class(class) \

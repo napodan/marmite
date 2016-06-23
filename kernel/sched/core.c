@@ -3569,6 +3569,20 @@ int wake_up_state(struct task_struct *p, unsigned int state)
 }
 
 /*
+ * This function clears the sched_dl_entity static params.
+ */
+void __dl_clear_params(struct task_struct *p)
+{
+	struct sched_dl_entity *dl_se = &p->dl;
+
+	dl_se->dl_runtime = 0;
+	dl_se->dl_deadline = 0;
+	dl_se->dl_period = 0;
+	dl_se->flags = 0;
+	dl_se->dl_bw = 0;
+}
+
+/*
  * Perform scheduler related setup for a newly forked process p.
  * p is forked by current.
  *
@@ -3731,6 +3745,15 @@ static inline int dl_bw_cpus(int i)
 	return cpus;
 }
 #else
+inline struct dl_bw *dl_bw_of(int i)
+{
+	return &cpu_rq(i)->dl.dl_bw;
+}
+
+static inline int dl_bw_cpus(int i)
+{
+	return 1;
+}
 #endif
 
 #ifdef TO_DO

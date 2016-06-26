@@ -1674,7 +1674,7 @@ const struct sched_class dl_sched_class = {
 	.next			= &rt_sched_class,
 	.enqueue_task		= enqueue_task_dl,
 	.dequeue_task		= dequeue_task_dl,
-//	.yield_task		= yield_task_dl,
+	.yield_task		= yield_task_dl,
 
 	.check_preempt_curr	= check_preempt_curr_dl,
 
@@ -1694,7 +1694,7 @@ const struct sched_class dl_sched_class = {
 	.set_curr_task		= set_curr_task_dl,
 	.task_tick		= task_tick_dl,
 	.task_fork              = task_fork_dl,
-//	.task_dead		= task_dead_dl,
+	.task_dead		= task_dead_dl,
 
 	.prio_changed           = prio_changed_dl,
 	.switched_from		= switched_from_dl,

@@ -1,6 +1,6 @@
 
 #include <linux/sched.h>
-//#include <linux/sched/sysctl.h>
+#include <linux/sched/sysctl.h>
 #include <linux/sched/rt.h>
 #include <linux/sched/deadline.h>
 #include <linux/mutex.h>
@@ -9,7 +9,7 @@
 #include <linux/tick.h>
 
 #include "cpupri.h"
-//#include "cpudeadline.h"
+#include "cpudeadline.h"
 #include "cpuacct.h"
 
 extern __read_mostly int scheduler_running;

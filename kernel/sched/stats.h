@@ -54,22 +54,14 @@ static inline void sched_info_reset_dequeued(struct task_struct *t)
 }
 
 /*
- * Called when a process is dequeued from the active array and given
- * the cpu.  We should note that with the exception of interactive
- * tasks, the expired queue will become the active queue after the active
- * queue is empty, without explicitly dequeuing and requeuing tasks in the
- * expired queue.  (Interactive tasks may be requeued directly to the
- * active queue, thus delaying tasks in the expired queue from running;
- * see scheduler_tick()).
- *
- * Though we are interested in knowing how long it was from the *first* time a
+ * We are interested in knowing how long it was from the *first* time a
  * task was queued to the time that it finally hit a cpu, we call this routine
  * from dequeue_task() to account for possible rq->clock skew across cpus. The
  * delta taken on each cpu would annul the skew.
  */
 static inline void sched_info_dequeued(struct task_struct *t)
 {
-	unsigned long long now = task_rq(t)->clock, delta = 0;
+	unsigned long long now = rq_clock(task_rq(t)), delta = 0;
 
 	if (unlikely(sched_info_on()))
 		if (t->sched_info.last_queued)
@@ -87,7 +79,7 @@ static inline void sched_info_dequeued(struct task_struct *t)
  */
 static void sched_info_arrive(struct task_struct *t)
 {
-	unsigned long long now = task_rq(t)->clock, delta = 0;
+	unsigned long long now = rq_clock(task_rq(t)), delta = 0;
 
 	if (t->sched_info.last_queued)
 		delta = now - t->sched_info.last_queued;
@@ -108,7 +100,7 @@ static inline void sched_info_queued(struct task_struct *t)
 {
 	if (unlikely(sched_info_on()))
 		if (!t->sched_info.last_queued)
-			t->sched_info.last_queued = task_rq(t)->clock;
+			t->sched_info.last_queued = rq_clock(task_rq(t));
 }
 
 /*
@@ -120,7 +112,7 @@ static inline void sched_info_queued(struct task_struct *t)
  */
 static inline void sched_info_depart(struct task_struct *t)
 {
-	unsigned long long delta = task_rq(t)->clock -
+	unsigned long long delta = rq_clock(task_rq(t)) -
 					t->sched_info.last_arrival;
 
 	rq_sched_info_depart(task_rq(t), delta);
@@ -182,21 +174,14 @@ sched_info_switch(struct task_struct *prev, struct task_struct *next)
 static inline void account_group_user_time(struct task_struct *tsk,
 					   cputime_t cputime)
 {
-	struct thread_group_cputimer *cputimer;
-
-	/* tsk == current, ensure it is safe to use ->signal */
-	if (unlikely(tsk->exit_state))
-		return;
-
-	cputimer = &tsk->signal->cputimer;
+	struct thread_group_cputimer *cputimer = &tsk->signal->cputimer;
 
 	if (!cputimer->running)
 		return;
 
-	spin_lock(&cputimer->lock);
-	cputimer->cputime.utime =
-		cputime_add(cputimer->cputime.utime, cputime);
-	spin_unlock(&cputimer->lock);
+	raw_spin_lock(&cputimer->lock);
+	cputimer->cputime.utime += cputime;
+	raw_spin_unlock(&cputimer->lock);
 }
 
 /**
@@ -212,21 +197,14 @@ static inline void account_group_user_time(struct task_struct *tsk,
 static inline void account_group_system_time(struct task_struct *tsk,
 					     cputime_t cputime)
 {
-	struct thread_group_cputimer *cputimer;
-
-	/* tsk == current, ensure it is safe to use ->signal */
-	if (unlikely(tsk->exit_state))
-		return;
-
-	cputimer = &tsk->signal->cputimer;
+	struct thread_group_cputimer *cputimer = &tsk->signal->cputimer;
 
 	if (!cputimer->running)
 		return;
 
-	spin_lock(&cputimer->lock);
-	cputimer->cputime.stime =
-		cputime_add(cputimer->cputime.stime, cputime);
-	spin_unlock(&cputimer->lock);
+	raw_spin_lock(&cputimer->lock);
+	cputimer->cputime.stime += cputime;
+	raw_spin_unlock(&cputimer->lock);
 }
 
 /**
@@ -242,21 +220,12 @@ static inline void account_group_system_time(struct task_struct *tsk,
 static inline void account_group_exec_runtime(struct task_struct *tsk,
 					      unsigned long long ns)
 {
-	struct thread_group_cputimer *cputimer;
-	struct signal_struct *sig;
-
-	sig = tsk->signal;
-	/* see __exit_signal()->task_rq_unlock_wait() */
-	barrier();
-	if (unlikely(!sig))
-		return;
-
-	cputimer = &sig->cputimer;
+	struct thread_group_cputimer *cputimer = &tsk->signal->cputimer;
 
 	if (!cputimer->running)
 		return;
 
-	spin_lock(&cputimer->lock);
+	raw_spin_lock(&cputimer->lock);
 	cputimer->cputime.sum_exec_runtime += ns;
-	spin_unlock(&cputimer->lock);
+	raw_spin_unlock(&cputimer->lock);
 }

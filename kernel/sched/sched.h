@@ -244,7 +244,7 @@ extern int sched_group_set_shares(struct task_group *tg, unsigned long shares);
 extern void free_rt_sched_group(struct task_group *tg);
 extern int alloc_rt_sched_group(struct task_group *tg, struct task_group *parent);
 extern void init_tg_rt_entry(struct task_group *tg, struct rt_rq *rt_rq,
-		struct sched_rt_entity *rt_se, int cpu, int add,
+		struct sched_rt_entity *rt_se, int cpu,
 		struct sched_rt_entity *parent);
 
 extern struct task_group *sched_create_group(struct task_group *parent);
@@ -1429,6 +1429,8 @@ static inline void sched_rt_avg_update(struct rq *rq, u64 rt_delta)
 static inline void sched_rt_avg_update(struct rq *rq, u64 rt_delta) { }
 static inline void sched_avg_update(struct rq *rq) { }
 #endif
+
+extern void start_bandwidth_timer(struct hrtimer *period_timer, ktime_t period);
 
 #ifdef CONFIG_SMP
 #ifdef CONFIG_PREEMPT

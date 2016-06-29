@@ -205,5 +205,17 @@ struct ustat {
 };
 
 #endif	/* __KERNEL__ */
+
+/**
+ * struct callback_head - callback structure for use with RCU and task_work
+ * @next: next update requests in a list
+ * @func: actual update function to call after the grace period.
+ */
+struct callback_head {
+	struct callback_head *next;
+	void (*func)(struct callback_head *head);
+};
+#define rcu_head callback_head
+
 #endif /*  __ASSEMBLY__ */
 #endif /* _LINUX_TYPES_H */

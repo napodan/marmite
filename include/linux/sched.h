@@ -1840,8 +1840,6 @@ static inline void wake_up_idle_cpu(int cpu) { }
 #endif
 
 
-extern unsigned int sysctl_sched_compat_yield;
-
 #ifdef CONFIG_RT_MUTEXES
 extern int rt_mutex_getprio(struct task_struct *p);
 extern void rt_mutex_setprio(struct task_struct *p, int prio);

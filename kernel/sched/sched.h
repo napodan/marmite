@@ -37,7 +37,29 @@ extern __read_mostly int scheduler_running;
  */
 #define NS_TO_JIFFIES(TIME)	((unsigned long)(TIME) / (NSEC_PER_SEC / HZ))
 
-#define SCHED_LOAD_SHIFT	10
+/*
+ * Increase resolution of nice-level calculations for 64-bit architectures.
+ * The extra resolution improves shares distribution and load balancing of
+ * low-weight task groups (eg. nice +19 on an autogroup), deeper taskgroup
+ * hierarchies, especially on larger systems. This is not a user-visible change
+ * and does not change the user-interface for setting shares/weights.
+ *
+ * We increase resolution only if we have enough bits to allow this increased
+ * resolution (i.e. BITS_PER_LONG > 32). The costs for increasing resolution
+ * when BITS_PER_LONG <= 32 are pretty high and the returns do not justify the
+ * increased costs.
+ */
+#if 0 /* BITS_PER_LONG > 32 -- currently broken: it increases power usage under light load  */
+# define SCHED_LOAD_RESOLUTION	10
+# define scale_load(w)		((w) << SCHED_LOAD_RESOLUTION)
+# define scale_load_down(w)	((w) >> SCHED_LOAD_RESOLUTION)
+#else
+# define SCHED_LOAD_RESOLUTION	0
+# define scale_load(w)		(w)
+# define scale_load_down(w)	(w)
+#endif
+
+#define SCHED_LOAD_SHIFT	(10 + SCHED_LOAD_RESOLUTION)
 #define SCHED_LOAD_SCALE	(1L << SCHED_LOAD_SHIFT)
 
 #define NICE_0_LOAD		SCHED_LOAD_SCALE
@@ -1116,12 +1138,49 @@ extern const_debug unsigned int sysctl_sched_features;
 
 enum {
 #include "features.h"
+	__SCHED_FEAT_NR,
 };
 
 #undef SCHED_FEAT
 
-#define sched_feat(x) (sysctl_sched_features & (1UL << __SCHED_FEAT_##x))
+#if defined(CONFIG_SCHED_DEBUG) && defined(HAVE_JUMP_LABEL)
+static __always_inline bool static_branch__true(struct static_key *key)
+{
+	return static_key_true(key); /* Not out of line branch. */
+}
 
+static __always_inline bool static_branch__false(struct static_key *key)
+{
+	return static_key_false(key); /* Out of line branch. */
+}
+
+#define SCHED_FEAT(name, enabled)					\
+static __always_inline bool static_branch_##name(struct static_key *key) \
+{									\
+	return static_branch__##enabled(key);				\
+}
+
+#include "features.h"
+
+#undef SCHED_FEAT
+
+extern struct static_key sched_feat_keys[__SCHED_FEAT_NR];
+#define sched_feat(x) (static_branch_##x(&sched_feat_keys[__SCHED_FEAT_##x]))
+#else /* !(SCHED_DEBUG && HAVE_JUMP_LABEL) */
+#define sched_feat(x) (sysctl_sched_features & (1UL << __SCHED_FEAT_##x))
+#endif /* SCHED_DEBUG && HAVE_JUMP_LABEL */
+
+#ifdef CONFIG_NUMA_BALANCING
+#define sched_feat_numa(x) sched_feat(x)
+#ifdef CONFIG_SCHED_DEBUG
+#define numabalancing_enabled sched_feat_numa(NUMA)
+#else
+extern bool numabalancing_enabled;
+#endif /* CONFIG_SCHED_DEBUG */
+#else
+#define sched_feat_numa(x) (0)
+#define numabalancing_enabled (0)
+#endif /* CONFIG_NUMA_BALANCING */
 
 static inline u64 global_rt_period(void)
 {
@@ -1161,10 +1220,27 @@ static inline int task_running(struct rq *rq, struct task_struct *p)
 #ifndef __ARCH_WANT_UNLOCKED_CTXSW
 static inline void prepare_lock_switch(struct rq *rq, struct task_struct *next)
 {
+#ifdef CONFIG_SMP
+	/*
+	 * We can optimise this out completely for !SMP, because the
+	 * SMP rebalancing from interrupt is the only thing that cares
+	 * here.
+	 */
+	next->on_cpu = 1;
+#endif
 }
 
 static inline void finish_lock_switch(struct rq *rq, struct task_struct *prev)
 {
+#ifdef CONFIG_SMP
+	/*
+	 * After ->on_cpu is cleared, the task can be moved to a different CPU.
+	 * We must ensure this doesn't happen until the switch is completely
+	 * finished.
+	 */
+	smp_wmb();
+	prev->on_cpu = 0;
+#endif
 #ifdef CONFIG_DEBUG_SPINLOCK
 	/* this is a valid case when another task releases the spinlock */
 	rq->lock.owner = current;
@@ -1213,6 +1289,12 @@ static inline void finish_lock_switch(struct rq *rq, struct task_struct *prev)
 #endif
 }
 #endif /* __ARCH_WANT_UNLOCKED_CTXSW */
+
+/*
+ * wake flags
+ */
+#define WF_SYNC		0x01		/* waker goes to sleep after wakeup */
+#define WF_FORK		0x02		/* child wakeup after fork */
 
 static inline void update_load_add(struct load_weight *lw, unsigned long inc)
 {

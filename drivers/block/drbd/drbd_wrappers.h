@@ -3,6 +3,7 @@
 
 #include <linux/ctype.h>
 #include <linux/mm.h>
+#include "drbd_int.h"
 
 /* see get_sb_bdev and bd_claim */
 extern char *drbd_sec_holder;
@@ -20,8 +21,8 @@ static inline void drbd_set_my_capacity(struct drbd_conf *mdev,
 
 /* bi_end_io handlers */
 extern void drbd_md_io_complete(struct bio *bio, int error);
-extern void drbd_endio_sec(struct bio *bio, int error);
-extern void drbd_endio_pri(struct bio *bio, int error);
+extern void drbd_peer_request_endio(struct bio *bio, int error);
+extern void drbd_request_endio(struct bio *bio, int error);
 
 /*
  * used to submit our private bio
@@ -39,34 +40,10 @@ static inline void drbd_generic_make_request(struct drbd_conf *mdev,
 		return;
 	}
 
-	if (FAULT_ACTIVE(mdev, fault_type))
+	if (drbd_insert_fault(mdev, fault_type))
 		bio_endio(bio, -EIO);
 	else
 		generic_make_request(bio);
-}
-
-static inline void drbd_plug_device(struct drbd_conf *mdev)
-{
-	struct request_queue *q;
-	q = bdev_get_queue(mdev->this_bdev);
-
-	spin_lock_irq(q->queue_lock);
-
-/* XXX the check on !blk_queue_plugged is redundant,
- * implicitly checked in blk_plug_device */
-
-	if (!blk_queue_plugged(q)) {
-		blk_plug_device(q);
-		del_timer(&q->unplug_timer);
-		/* unplugging should not happen automatically... */
-	}
-	spin_unlock_irq(q->queue_lock);
-}
-
-static inline int drbd_crypto_is_hash(struct crypto_tfm *tfm)
-{
-        return (crypto_tfm_alg_type(tfm) & CRYPTO_ALG_TYPE_HASH_MASK)
-                == CRYPTO_ALG_TYPE_HASH;
 }
 
 #ifndef __CHECKER__

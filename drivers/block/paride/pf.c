@@ -118,13 +118,15 @@
 #define PF_NAME		"pf"
 #define PF_UNITS	4
 
+#include <linux/types.h>
+
 /* Here are things one can override from the insmod command.
    Most are autoprobed by paride unless set here.  Verbose is off
    by default.
 
 */
 
-static int verbose = 0;
+static bool verbose = 0;
 static int major = PF_MAJOR;
 static char *name = PF_NAME;
 static int cluster = 64;
@@ -152,8 +154,10 @@ enum {D_PRT, D_PRO, D_UNI, D_MOD, D_SLV, D_LUN, D_DLY};
 #include <linux/spinlock.h>
 #include <linux/blkdev.h>
 #include <linux/blkpg.h>
+#include <linux/mutex.h>
 #include <asm/uaccess.h>
 
+static DEFINE_MUTEX(pf_mutex);
 static DEFINE_SPINLOCK(pf_spin_lock);
 
 module_param(verbose, bool, 0644);
@@ -207,7 +211,7 @@ static int pf_ioctl(struct block_device *bdev, fmode_t mode,
 		    unsigned int cmd, unsigned long arg);
 static int pf_getgeo(struct block_device *bdev, struct hd_geometry *geo);
 
-static int pf_release(struct gendisk *disk, fmode_t mode);
+static void pf_release(struct gendisk *disk, fmode_t mode);
 
 static int pf_detect(void);
 static void do_pf_read(void);
@@ -241,7 +245,8 @@ static struct pf_unit units[PF_UNITS];
 static int pf_identify(struct pf_unit *pf);
 static void pf_lock(struct pf_unit *pf, int func);
 static void pf_eject(struct pf_unit *pf);
-static int pf_check_media(struct gendisk *disk);
+static unsigned int pf_check_events(struct gendisk *disk,
+				    unsigned int clearing);
 
 static char pf_scratch[512];	/* scratch block buffer */
 
@@ -266,9 +271,9 @@ static const struct block_device_operations pf_fops = {
 	.owner		= THIS_MODULE,
 	.open		= pf_open,
 	.release	= pf_release,
-	.locked_ioctl	= pf_ioctl,
+	.ioctl		= pf_ioctl,
 	.getgeo		= pf_getgeo,
-	.media_changed	= pf_check_media,
+	.check_events	= pf_check_events,
 };
 
 static void __init pf_init_units(void)
@@ -299,20 +304,26 @@ static void __init pf_init_units(void)
 static int pf_open(struct block_device *bdev, fmode_t mode)
 {
 	struct pf_unit *pf = bdev->bd_disk->private_data;
+	int ret;
 
+	mutex_lock(&pf_mutex);
 	pf_identify(pf);
 
+	ret = -ENODEV;
 	if (pf->media_status == PF_NM)
-		return -ENODEV;
+		goto out;
 
+	ret = -EROFS;
 	if ((pf->media_status == PF_RO) && (mode & FMODE_WRITE))
-		return -EROFS;
+		goto out;
 
+	ret = 0;
 	pf->access++;
 	if (pf->removable)
 		pf_lock(pf, 1);
-
-	return 0;
+out:
+	mutex_unlock(&pf_mutex);
+	return ret;
 }
 
 static int pf_getgeo(struct block_device *bdev, struct hd_geometry *geo)
@@ -342,29 +353,35 @@ static int pf_ioctl(struct block_device *bdev, fmode_t mode, unsigned int cmd, u
 
 	if (pf->access != 1)
 		return -EBUSY;
+	mutex_lock(&pf_mutex);
 	pf_eject(pf);
+	mutex_unlock(&pf_mutex);
+
 	return 0;
 }
 
-static int pf_release(struct gendisk *disk, fmode_t mode)
+static void pf_release(struct gendisk *disk, fmode_t mode)
 {
 	struct pf_unit *pf = disk->private_data;
 
-	if (pf->access <= 0)
-		return -EINVAL;
+	mutex_lock(&pf_mutex);
+	if (pf->access <= 0) {
+		mutex_unlock(&pf_mutex);
+		WARN_ON(1);
+		return;
+	}
 
 	pf->access--;
 
 	if (!pf->access && pf->removable)
 		pf_lock(pf, 0);
 
-	return 0;
-
+	mutex_unlock(&pf_mutex);
 }
 
-static int pf_check_media(struct gendisk *disk)
+static unsigned int pf_check_events(struct gendisk *disk, unsigned int clearing)
 {
-	return 1;
+	return DISK_EVENT_MEDIA_CHANGE;
 }
 
 static inline int status_reg(struct pf_unit *pf)

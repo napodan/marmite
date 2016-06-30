@@ -48,6 +48,8 @@ static const char *drbd_conn_s_names[] = {
 	[C_PAUSED_SYNC_T]    = "PausedSyncT",
 	[C_VERIFY_S]         = "VerifyS",
 	[C_VERIFY_T]         = "VerifyT",
+	[C_AHEAD]            = "Ahead",
+	[C_BEHIND]           = "Behind",
 };
 
 static const char *drbd_role_s_names[] = {
@@ -87,12 +89,14 @@ static const char *drbd_state_sw_errors[] = {
 	[-SS_LOWER_THAN_OUTDATED] = "Disk state is lower than outdated",
 	[-SS_IN_TRANSIENT_STATE] = "In transient state, retry after next state change",
 	[-SS_CONCURRENT_ST_CHG] = "Concurrent state changes detected and aborted",
+	[-SS_OUTDATE_WO_CONN] = "Need a connection for a graceful disconnect/outdate peer",
+	[-SS_O_VOL_PEER_PRI] = "Other vol primary on peer not allowed by config",
 };
 
 const char *drbd_conn_str(enum drbd_conns s)
 {
 	/* enums are unsigned... */
-	return s > C_PAUSED_SYNC_T ? "TOO_LARGE" : drbd_conn_s_names[s];
+	return s > C_BEHIND ? "TOO_LARGE" : drbd_conn_s_names[s];
 }
 
 const char *drbd_role_str(enum drbd_role s)
@@ -105,7 +109,7 @@ const char *drbd_disk_str(enum drbd_disk_state s)
 	return s > D_UP_TO_DATE    ? "TOO_LARGE" : drbd_disk_s_names[s];
 }
 
-const char *drbd_set_st_err_str(enum drbd_state_ret_codes err)
+const char *drbd_set_st_err_str(enum drbd_state_rv err)
 {
 	return err <= SS_AFTER_LAST_ERROR ? "TOO_SMALL" :
 	       err > SS_TWO_PRIMARIES ? "TOO_LARGE"
